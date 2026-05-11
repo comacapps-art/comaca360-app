@@ -1,4 +1,4 @@
-﻿
+
 <!DOCTYPE html>
 <html lang="es">
 
@@ -129,7 +129,7 @@
             LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle,
             PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart,
             Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock
-            , Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw
+            , Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft
         } from 'lucide-react';
 
         // --- CONFIGURACIÓN DE FIREBASE ---
@@ -1887,7 +1887,8 @@
                                                     filename: `Pedidos_Masivos_${new Date().getTime()}.pdf`,
                                                     image: { type: 'jpeg', quality: 0.98 },
                                                     html2canvas: { scale: 2, useCORS: true, logging: false },
-                                                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                                                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+                                                    pagebreak: { mode: ['css', 'legacy'] }
                                                 };
                                                 window.html2pdf().set(opt).from(element).save();
                                             }} 
@@ -1899,50 +1900,114 @@
                                     </div>
                                 </div>
                                 <div className="flex-1 overflow-y-auto bg-slate-100 print-scroll-reset p-4">
-                                    <div id="bulk-print-container" className="grid grid-cols-2 gap-4 bg-white p-4">
-                                        {pedidos.filter(p => selectedPedidos.includes(p.id)).map((pedido, idx) => (
-                                            <div key={idx} className="border border-slate-300 p-2 text-xs flex flex-col page-break-inside-avoid" style={{ pageBreakInside: 'avoid' }}>
-                                                <div className="border-b border-slate-300 pb-1 mb-1 flex justify-between items-start">
-                                                    <div className="min-w-0 pr-2">
-                                                        <div className="font-black text-[11px] text-slate-800 truncate" title={pedido.clienteNombre}>{pedido.clienteNombre}</div>
-                                                        <div className="text-[9px] text-slate-600 truncate">Vend: {pedido.vendedorNombre}</div>
+                                    <div id="bulk-print-container" className="bg-white p-2" style={{ width: '100%' }}>
+                                        {pedidos.filter(p => selectedPedidos.includes(p.id)).flatMap((pedido, pedidoIdx) => {
+                                            const ITEMS_PER_PAGE = 12;
+                                            const articulos = pedido.articulos || [];
+                                            const totalPages = Math.max(1, Math.ceil(articulos.length / ITEMS_PER_PAGE));
+                                            return Array.from({ length: totalPages }, (_, pageIdx) => {
+                                                const pageArticulos = articulos.slice(pageIdx * ITEMS_PER_PAGE, (pageIdx + 1) * ITEMS_PER_PAGE);
+                                                const isLastPage = pageIdx === totalPages - 1;
+                                                const paddedRows = [...pageArticulos];
+                                                while (paddedRows.length < ITEMS_PER_PAGE) paddedRows.push(null);
+                                                return (
+                                                    <div key={`${pedidoIdx}-${pageIdx}`} style={{ 
+                                                        pageBreakInside: 'avoid', 
+                                                        pageBreakAfter: 'auto', 
+                                                        fontFamily: 'Arial, sans-serif', 
+                                                        fontSize: '9px', 
+                                                        border: '1px solid #64748b', 
+                                                        width: '100%',
+                                                        marginBottom: '15px'
+                                                    }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                                                            <colgroup>
+                                                                <col style={{ width: '7%' }} /><col style={{ width: '31%' }} /><col style={{ width: '7%' }} />
+                                                                <col style={{ width: '7%' }} /><col style={{ width: '10%' }} /><col style={{ width: '8%' }} />
+                                                                <col style={{ width: '8%' }} /><col style={{ width: '8%' }} /><col style={{ width: '7%' }} />
+                                                                <col style={{ width: '7%' }} />
+                                                            </colgroup>
+                                                            <tbody>
+                                                                {/* HEADER ROW 1 */}
+                                                                <tr style={{ borderBottom: '1px solid #64748b' }}>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>CLIENTE</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 700 }} colSpan={2}>{pedido.clienteNombre}{totalPages > 1 ? ` (${pageIdx+1}/${totalPages})` : ''}</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>FECHA</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'center' }}>{safeFormatDate(pedido.fecha)}</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>FACT</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }}></td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>NE</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }}></td>
+                                                                    <td style={{ padding: '2px 3px', fontWeight: 900, fontSize: '8px' }}>LISTA: <span style={{ fontWeight: 400, textTransform: 'uppercase' }}>{pedido.listaPrecio}</span></td>
+                                                                </tr>
+                                                                {/* HEADER ROW 2 */}
+                                                                <tr style={{ borderBottom: '1px solid #64748b' }}>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>RUTA :</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 700 }} colSpan={2}>{pedido.vendedorId} - {pedido.vendedorNombre}</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>CIUDAD</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={6}></td>
+                                                                </tr>
+                                                                {/* COLUMN HEADERS */}
+                                                                <tr style={{ borderBottom: '1px solid #64748b', background: '#e2e8f0', fontWeight: 900, textAlign: 'center' }}>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }}>COD</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'left' }} colSpan={2}>DESCRIPCION</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }}>CAJA</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }}>UNID</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={2}>PRECIO</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={2}>DESCTO</td>
+                                                                    <td style={{ padding: '2px 3px' }}>TOTAL</td>
+                                                                </tr>
+                                                                {/* ITEM ROWS */}
+                                                                {paddedRows.map((art, i) => (
+                                                                    <tr key={i} style={{ borderBottom: '1px solid #cbd5e1', height: '14px' }}>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px', textAlign: 'center', fontFamily: 'monospace', overflow: 'hidden' }}>{art ? art.sku : ''}</td>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }} colSpan={2}>{art ? art.nombre : '\u00a0'}</td>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px', textAlign: 'center' }}>
+                                                                            {art && art.precio === art.precioCaja && art.precioCaja > 0 && art.precio !== art.precioUnd ? art.cantidad : ''}
+                                                                        </td>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px', textAlign: 'center' }}>
+                                                                            {art && !(art.precio === art.precioCaja && art.precioCaja > 0 && art.precio !== art.precioUnd) ? art.cantidad : (art ? '' : '')}
+                                                                        </td>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px', textAlign: 'right' }} colSpan={2}>
+                                                                            {art && art.precio > 0 ? `$${Number(art.precio).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ''}
+                                                                        </td>
+                                                                        <td style={{ borderRight: '1px solid #cbd5e1', padding: '1px 3px' }} colSpan={2}></td>
+                                                                        <td style={{ padding: '1px 3px', textAlign: 'right', fontWeight: 700 }}>{art ? (art.subtotal > 0 ? ('$' + Number(art.subtotal).toLocaleString(undefined,{minimumFractionDigits:2})) : (art.precio > 0 && art.cantidad > 0 ? ('$' + Number(art.precio * art.cantidad).toLocaleString(undefined,{minimumFractionDigits:2})) : '-')) : ''}</td>
+                                                                    </tr>
+                                                                ))}
+                                                                {/* TOTALS ROW */}
+                                                                <tr style={{ borderBottom: '1px solid #64748b', borderTop: '1px solid #64748b', fontWeight: 900, background: '#f8fafc' }}>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={3}></td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'center' }}>
+                                                                        {pageArticulos.filter(a => a.precio === a.precioCaja && a.precioCaja > 0 && a.precio !== a.precioUnd).reduce((s, a) => s + (a.cantidad || 0), 0) || ''}
+                                                                    </td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'center' }}>
+                                                                        {pageArticulos.filter(a => !(a.precio === a.precioCaja && a.precioCaja > 0 && a.precio !== a.precioUnd)).reduce((s, a) => s + (a.cantidad || 0), 0) || ''}
+                                                                    </td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'right' }} colSpan={2}></td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={2}></td>
+                                                                    <td style={{ padding: '2px 3px', textAlign: 'right', fontWeight: 900 }}>{isLastPage ? `$${Number(pedido.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `$${Number(pageArticulos.reduce((s,a)=>s+(a.subtotal||0),0)).toLocaleString(undefined,{minimumFractionDigits:2})}`}</td>
+                                                                </tr>
+                                                                {/* FOOTER */}
+                                                                {isLastPage && (<>
+                                                                    <tr style={{ borderBottom: '1px solid #94a3b8' }}>
+                                                                        <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, background: '#e2e8f0', fontSize: '8px' }} colSpan={1}>NOTAS DEL VENDEDOR:</td>
+                                                                        <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={4}>{pedido.observacion || '\u00a0'}</td>
+                                                                        <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, background: '#e2e8f0', fontSize: '8px' }} colSpan={2}>DEUDA:</td>
+                                                                        <td style={{ padding: '2px 3px' }} colSpan={3}></td>
+                                                                    </tr>
+                                                                    <tr>
+                                                                        <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, background: '#e2e8f0', fontSize: '8px' }}>OBSERVACIONES CXC:</td>
+                                                                        <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px' }} colSpan={4}></td>
+                                                                        <td style={{ padding: '4px 3px', fontWeight: 900, textAlign: 'center', fontSize: '8px', letterSpacing: '1px' }} colSpan={5}>AUTORIZADO</td>
+                                                                    </tr>
+                                                                </>)}
+                                                            </tbody>
+                                                        </table>
                                                     </div>
-                                                    <div className="text-right shrink-0">
-                                                        <div className="font-bold text-[9px]">{safeFormatDate(pedido.fecha)}</div>
-                                                        <div className="text-[9px] font-bold text-slate-500 uppercase">{pedido.listaPrecio}</div>
-                                                    </div>
-                                                </div>
-                                                <table className="w-full text-[9px] mb-1">
-                                                    <thead className="border-b border-slate-200">
-                                                        <tr>
-                                                            <th className="text-center py-0.5 w-8">Cant</th>
-                                                            <th className="text-left py-0.5">Descripción / Detalle</th>
-                                                            <th className="text-right py-0.5 w-16">Subtotal</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {(pedido.articulos || []).map((art, i) => (
-                                                            <tr key={i} className="border-b border-slate-100 border-dashed">
-                                                                <td className="py-1 font-bold text-center align-top">{art.cantidad}</td>
-                                                                <td className="py-1 align-top">
-                                                                    <div className="truncate max-w-[150px] font-bold text-[10px]" title={art.nombre}>
-                                                                        {art.nombre}
-                                                                    </div>
-                                                                    <div className="text-[8px] text-slate-500 mt-0.5 font-medium leading-tight">
-                                                                        <span className="font-black text-slate-700">{art.sku}</span> | L: {art.listaAplicada || pedido.listaPrecio || 'N/D'} | {art.precio === art.precioCaja && art.precioCaja > 0 && art.precio !== art.precioUnd ? 'Caja' : 'Und'}
-                                                                    </div>
-                                                                </td>
-                                                                <td className="py-1 text-right font-medium align-top">${Number(art.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                                <div className="mt-auto pt-1 border-t border-slate-300 flex justify-between items-center font-black text-xs">
-                                                    <span>TOTAL:</span>
-                                                    <span>${Number(pedido.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                                </div>
-                                            </div>
-                                        ))}
+                                                );
+                                            });
+                                        })}
                                     </div>
                                 </div>
                             </div>
@@ -2459,6 +2524,7 @@
                     <MiniCardKPI title="Ventas Totales" value={`$${stats.totalMonto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} subValue={meta?.monto > 0 ? `Meta: $${meta.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Sin Meta"} icon={DollarSign} colorClass="bg-blue-100 text-blue-700" percent={calcPct(stats.totalMonto, meta?.monto)} />
                     <MiniCardKPI title="Cajas Totales" value={stats.totalCajas.toLocaleString(undefined, { maximumFractionDigits: 2 })} subValue={meta?.cajas > 0 ? `Meta: ${meta.cajas.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "Sin Meta"} icon={Box} colorClass="bg-yellow-100 text-yellow-700" percent={calcPct(stats.totalCajas, meta?.cajas)} />
                     <MiniCardKPI title="Unidades Totales" value={stats.totalUnidades.toLocaleString(undefined, { maximumFractionDigits: 2 })} subValue={meta?.unidades > 0 ? `Meta: ${meta.unidades.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "Sin Meta"} icon={Package} colorClass="bg-orange-100 text-orange-700" percent={calcPct(stats.totalUnidades, meta?.unidades)} />
+                    <MiniCardKPI title="Kilos Totales" value={`${Number(stats.totalKilos || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`} icon={Weight} colorClass="bg-purple-100 text-purple-700" />
                     <MiniCardKPI title="Pedidos Totales" value={stats.totalPedidos?.toLocaleString() || "0"} subValue="Facturas emitidas" icon={ShoppingCart} colorClass="bg-emerald-100 text-emerald-700" />
                     <MiniCardKPI title="Clientes Activos" value={stats.activeClientsCount.toLocaleString()} subValue={meta?.clientes > 0 ? `Meta: ${meta.clientes.toLocaleString()}` : "Total con compra"} icon={Users} colorClass="bg-green-100 text-green-700" percent={calcPct(stats.activeClientsCount, meta?.clientes)} />
                     <MiniCardKPI title="Prod. Diferentes" value={stats.productos?.toLocaleString() || "0"} subValue="Variedad vendida" icon={Tag} colorClass="bg-purple-100 text-purple-700" />
@@ -2473,6 +2539,7 @@
             const [filtroGrupo, setFiltroGrupo] = useState('TODOS');
             const [filtroSubgrupo, setFiltroSubgrupo] = useState('TODOS');
             const [vistaActiva, setVistaActiva] = useState('grupo'); // 'grupo' | 'subgrupo'
+            const [metrica, setMetrica] = useState('monto'); // 'monto' | 'cajas'
 
             const fmtVE = (n) => Number(n || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -2497,14 +2564,12 @@
                 ventasFiltradas.forEach(s => {
                     const grupo = s.grupo || 'SIN GRUPO';
                     const nombre = getNombreVendedor(s);
-                    const monto = s.monto || 0;
+                    const valor = metrica === 'monto' ? (s.monto || 0) : (s.cajas || 0);
 
-                    // Total del grupo
-                    totalesPorGrupo[grupo] = (totalesPorGrupo[grupo] || 0) + monto;
+                    totalesPorGrupo[grupo] = (totalesPorGrupo[grupo] || 0) + valor;
 
-                    // Por vendedor dentro del grupo
                     if (!vendedorPorGrupo[grupo]) vendedorPorGrupo[grupo] = {};
-                    vendedorPorGrupo[grupo][nombre] = (vendedorPorGrupo[grupo][nombre] || 0) + monto;
+                    vendedorPorGrupo[grupo][nombre] = (vendedorPorGrupo[grupo][nombre] || 0) + valor;
                 });
 
                 const filas = [];
@@ -2512,12 +2577,12 @@
                     const totalGrupo = totalesPorGrupo[grupo] || 1;
                     Object.entries(vendedores)
                         .sort((a, b) => b[1] - a[1])
-                        .forEach(([vendedor, monto]) => {
-                            filas.push({ grupo, vendedor, monto, total: totalGrupo, pct: (monto / totalGrupo) * 100 });
+                        .forEach(([vendedor, valor]) => {
+                            filas.push({ grupo, vendedor, monto: valor, total: totalGrupo, pct: (valor / totalGrupo) * 100 });
                         });
                 });
                 return filas;
-            }, [ventasFiltradas, users]);
+            }, [ventasFiltradas, users, metrica]);
 
             // Calcular market share por SUBGRUPO
             const dataSubgrupos = useMemo(() => {
@@ -2527,12 +2592,12 @@
                 ventasFiltradas.forEach(s => {
                     const sub = s.subgrupo || 'SIN SUBGRUPO';
                     const nombre = getNombreVendedor(s);
-                    const monto = s.monto || 0;
+                    const valor = metrica === 'monto' ? (s.monto || 0) : (s.cajas || 0);
 
-                    totalesPorSub[sub] = (totalesPorSub[sub] || 0) + monto;
+                    totalesPorSub[sub] = (totalesPorSub[sub] || 0) + valor;
 
                     if (!vendedorPorSub[sub]) vendedorPorSub[sub] = {};
-                    vendedorPorSub[sub][nombre] = (vendedorPorSub[sub][nombre] || 0) + monto;
+                    vendedorPorSub[sub][nombre] = (vendedorPorSub[sub][nombre] || 0) + valor;
                 });
 
                 const filas = [];
@@ -2540,12 +2605,12 @@
                     const totalSub = totalesPorSub[subgrupo] || 1;
                     Object.entries(vendedores)
                         .sort((a, b) => b[1] - a[1])
-                        .forEach(([vendedor, monto]) => {
-                            filas.push({ subgrupo, vendedor, monto, total: totalSub, pct: (monto / totalSub) * 100 });
+                        .forEach(([vendedor, valor]) => {
+                            filas.push({ subgrupo, vendedor, monto: valor, total: totalSub, pct: (valor / totalSub) * 100 });
                         });
                 });
                 return filas;
-            }, [ventasFiltradas, users]);
+            }, [ventasFiltradas, users, metrica]);
 
             const gruposDisponibles = useMemo(() => ['TODOS', ...new Set(dataGrupos.map(d => d.grupo))], [dataGrupos]);
             const subgruposDisponibles = useMemo(() => ['TODOS', ...new Set(dataSubgrupos.map(d => d.subgrupo))], [dataSubgrupos]);
@@ -2572,13 +2637,20 @@
 
                     {/* Controles */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-wrap gap-4 items-center">
-                        {/* Toggle vista */}
                         <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
                             <button onClick={() => { setVistaActiva('grupo'); setFiltroGrupo('TODOS'); }} className={`px-5 py-2 rounded-lg font-bold text-sm transition-all ${vistaActiva === 'grupo' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'}`}>Por Grupo (Marca)</button>
                             <button onClick={() => { setVistaActiva('subgrupo'); setFiltroSubgrupo('TODOS'); }} className={`px-5 py-2 rounded-lg font-bold text-sm transition-all ${vistaActiva === 'subgrupo' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'}`}>Por Subgrupo</button>
                         </div>
 
-                        {/* Filtro */}
+                        <div className="flex bg-indigo-50 rounded-xl p-1 gap-1 border border-indigo-100">
+                            <button onClick={() => setMetrica('monto')} className={`px-4 py-2 rounded-lg font-bold text-xs transition-all flex items-center gap-2 ${metrica === 'monto' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-400 hover:bg-indigo-100/50'}`}>
+                                <DollarSign size={14} /> Dinero ($)
+                            </button>
+                            <button onClick={() => setMetrica('cajas')} className={`px-4 py-2 rounded-lg font-bold text-xs transition-all flex items-center gap-2 ${metrica === 'cajas' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-400 hover:bg-indigo-100/50'}`}>
+                                <Box size={14} /> Cajas
+                            </button>
+                        </div>
+
                         {vistaActiva === 'grupo' ? (
                             <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Filtrar Grupo:</span>
@@ -2606,8 +2678,8 @@
                                     <tr>
                                         <th className="px-6 py-4">Vendedor</th>
                                         {vistaActiva === 'grupo' ? <th className="px-6 py-4">Grupo (Marca)</th> : <th className="px-6 py-4">Subgrupo</th>}
-                                        <th className="px-6 py-4 text-right">Monto Vendido ($)</th>
-                                        <th className="px-6 py-4 text-right">Total Categoría ($)</th>
+                                        <th className="px-6 py-4 text-right">{metrica === 'monto' ? 'Monto Vendido ($)' : 'Cajas Vendidas'}</th>
+                                        <th className="px-6 py-4 text-right">{metrica === 'monto' ? 'Total Categoría ($)' : 'Total Cajas Categoría'}</th>
                                         <th className="px-6 py-4" style={{minWidth: '220px'}}>% Participación</th>
                                     </tr>
                                 </thead>
@@ -2888,6 +2960,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
             const [expandedHistCategory, setExpandedHistCategory] = useState(null);
             const [expandedHistClient, setExpandedHistClient] = useState(null);
+            const [metricaCompare, setMetricaCompare] = useState('monto'); // 'monto' | 'cajas' | 'kilos'
 
             const roleSales = useMemo(() => {
                 if (currentUser.rol === 'admin') return sales;
@@ -2935,10 +3008,35 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
             useEffect(() => {
                 if (availableYears.length > 0 && !selectedYear) {
-                    setSelectedYear(availableYears[0]);
-                    if (availableYears.length > 1) setCompareYear(availableYears[1]);
+                    const latestYear = availableYears[0];
+                    setSelectedYear(latestYear);
+                    setCompareYear(latestYear);
+                    
+                    // Encontrar el último mes con datos para este año
+                    const yearSales = roleSales.filter(s => s.fecha && String(s.fecha).startsWith(latestYear));
+                    let lastM = 0;
+                    yearSales.forEach(s => {
+                        const m = parseInt(String(s.fecha).substring(5, 7), 10) - 1;
+                        if (m > lastM) lastM = m;
+                    });
+                    
+                    setMainMonths([lastM]);
+                    setCompareMonths([lastM - 1 >= 0 ? lastM - 1 : 0]);
                 }
-            }, [availableYears, selectedYear]);
+            }, [availableYears, selectedYear, roleSales]);
+
+            const getPeriodLabel = (year, months) => {
+                if (!year) return '';
+                if (months.length === 12) return year;
+                if (months.length === 3) {
+                    if (months.includes(0)) return `T1 ${year}`;
+                    if (months.includes(3)) return `T2 ${year}`;
+                    if (months.includes(6)) return `T3 ${year}`;
+                    if (months.includes(9)) return `T4 ${year}`;
+                }
+                if (months.length === 1) return `${monthNames[months[0]]} ${year}`;
+                return `${months.length} Meses ${year}`;
+            };
 
             const historicalData = useMemo(() => {
                 let filtered = roleSales;
@@ -2952,18 +3050,30 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     });
                 }
 
-                const monthlyData = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(m => ({ monthIndex: m, month: monthNames[m], mainTotal: 0, compareTotal: 0, mainCajas: 0, compareCajas: 0 }));
+                const monthlyData = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(m => ({ monthIndex: m, month: monthNames[m], mainTotal: 0, compareTotal: 0, mainCajas: 0, compareCajas: 0, mainKilos: 0, compareKilos: 0 }));
 
                 let totalMainYear = 0;
                 let totalCompareYear = 0;
                 let totalMainCajas = 0;
+                let totalCompareCajas = 0;
                 let totalMainUnidades = 0;
+                let totalMainKilos = 0;
+                let totalCompareKilos = 0;
 
                 const clientesUnicosSet = new Set();
                 const topVendedoresMap = {};
                 const topClientsMap = {};
                 const topCategoriesMap = {};
                 const topProductsMap = {};
+
+                const ensureEntity = (map, key, initData) => {
+                    if (!map[key]) map[key] = { 
+                        mainMonto: 0, mainCajas: 0, mainKilos: 0, 
+                        compMonto: 0, compCajas: 0, compKilos: 0,
+                        ...initData 
+                    };
+                    return map[key];
+                };
 
                 filtered.forEach(s => {
                     if (!s.fecha) return;
@@ -2978,96 +3088,146 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     if (isMain) {
                         monthlyData[m].mainTotal += s.monto;
                         monthlyData[m].mainCajas += s.cajas || 0;
-
+                        monthlyData[m].mainKilos += s.kilos || 0;
                         totalMainYear += s.monto;
                         totalMainCajas += s.cajas || 0;
                         totalMainUnidades += s.unidades || 0;
-
+                        totalMainKilos += s.kilos || 0;
+                        monthlyData[m].mainKilos += s.kilos || 0;
                         if (s.monto > 0) clientesUnicosSet.add(s.idCliente);
 
-                            if (!topVendedoresMap[s.idVendedor]) {
-                                topVendedoresMap[s.idVendedor] = { nombre: s.vendedor, monto: 0, cajas: 0, unidades: 0 };
-                            }
-                            topVendedoresMap[s.idVendedor].monto += s.monto;
-                            topVendedoresMap[s.idVendedor].cajas += s.cajas || 0;
-                            topVendedoresMap[s.idVendedor].unidades += s.unidades || 0;
+                        // Agregación Main para Rankings
+                        const ven = ensureEntity(topVendedoresMap, s.idVendedor, { nombre: s.vendedor });
+                        ven.mainMonto += s.monto; ven.mainCajas += s.cajas || 0; ven.mainKilos += s.kilos || 0;
 
-                            if (!topClientsMap[s.cliente]) {
-                                topClientsMap[s.cliente] = { nombre: s.cliente, monto: 0, cajas: 0, productosVendidos: {} };
-                            }
-                            topClientsMap[s.cliente].monto += s.monto;
-                            topClientsMap[s.cliente].cajas += s.cajas || 0;
+                        const cli = ensureEntity(topClientsMap, s.cliente, { nombre: s.cliente, productosVendidos: {} });
+                        cli.mainMonto += s.monto; cli.mainCajas += s.cajas || 0; cli.mainKilos += s.kilos || 0;
+                        if (!cli.productosVendidos[s.articulo]) cli.productosVendidos[s.articulo] = { nombre: s.articulo, mainMonto: 0, mainCajas: 0, mainKilos: 0, compMonto: 0, compCajas: 0, compKilos: 0 };
+                        cli.productosVendidos[s.articulo].mainMonto += s.monto; cli.productosVendidos[s.articulo].mainCajas += s.cajas || 0; cli.productosVendidos[s.articulo].mainKilos += s.kilos || 0;
 
-                            if (!topClientsMap[s.cliente].productosVendidos[s.articulo]) {
-                                topClientsMap[s.cliente].productosVendidos[s.articulo] = { nombre: s.articulo, monto: 0, cajas: 0 };
-                            }
-                            topClientsMap[s.cliente].productosVendidos[s.articulo].monto += s.monto;
-                            topClientsMap[s.cliente].productosVendidos[s.articulo].cajas += s.cajas || 0;
+                        const cat = ensureEntity(topCategoriesMap, s.grupo, { nombre: s.grupo, productos: {}, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() });
+                        cat.mainMonto += s.monto; cat.mainCajas += s.cajas || 0; cat.mainKilos += s.kilos || 0;
+                        if (s.monto > 0) cat.clientesUnicosMain.add(s.idCliente);
+                        if (!cat.productos[s.articulo]) cat.productos[s.articulo] = { nombre: s.articulo, mainMonto: 0, mainCajas: 0, mainKilos: 0, compMonto: 0, compCajas: 0, compKilos: 0, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() };
+                        cat.productos[s.articulo].mainMonto += s.monto; cat.productos[s.articulo].mainCajas += s.cajas || 0; cat.productos[s.articulo].mainKilos += s.kilos || 0;
+                        if (s.monto > 0) cat.productos[s.articulo].clientesUnicosMain.add(s.idCliente);
 
-                            if (!topCategoriesMap[s.grupo]) {
-                                topCategoriesMap[s.grupo] = { nombre: s.grupo, monto: 0, unidades: 0, cajas: 0, productos: {}, clientesUnicos: new Set() };
-                            }
-                            topCategoriesMap[s.grupo].monto += s.monto;
-                            topCategoriesMap[s.grupo].unidades += s.unidades || 0;
-                            topCategoriesMap[s.grupo].cajas += s.cajas || 0;
-                            if (s.monto > 0) topCategoriesMap[s.grupo].clientesUnicos.add(s.idCliente);
-
-                            if (!topCategoriesMap[s.grupo].productos[s.articulo]) {
-                                topCategoriesMap[s.grupo].productos[s.articulo] = { nombre: s.articulo, monto: 0, unidades: 0, cajas: 0, clientesUnicos: new Set() };
-                            }
-                            topCategoriesMap[s.grupo].productos[s.articulo].monto += s.monto;
-                            topCategoriesMap[s.grupo].productos[s.articulo].unidades += s.unidades || 0;
-                            topCategoriesMap[s.grupo].productos[s.articulo].cajas += s.cajas || 0;
-                            if (s.monto > 0) topCategoriesMap[s.grupo].productos[s.articulo].clientesUnicos.add(s.idCliente);
-
-                            if (!topProductsMap[s.articulo]) {
-                                topProductsMap[s.articulo] = { nombre: s.articulo, grupo: s.grupo, monto: 0, unidades: 0, cajas: 0, clientesUnicos: new Set() };
-                            }
-                            topProductsMap[s.articulo].monto += s.monto;
-                            topProductsMap[s.articulo].unidades += s.unidades || 0;
-                            topProductsMap[s.articulo].cajas += s.cajas || 0;
-                            if (s.monto > 0) topProductsMap[s.articulo].clientesUnicos.add(s.idCliente);
+                        const pro = ensureEntity(topProductsMap, s.articulo, { nombre: s.articulo, grupo: s.grupo, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() });
+                        pro.mainMonto += s.monto; pro.mainCajas += s.cajas || 0; pro.mainKilos += s.kilos || 0;
+                        if (s.monto > 0) pro.clientesUnicosMain.add(s.idCliente);
                     }
 
                     if (isComp) {
                         monthlyData[m].compareTotal += s.monto;
                         monthlyData[m].compareCajas += s.cajas || 0;
+                        monthlyData[m].compareKilos += s.kilos || 0;
                         totalCompareYear += s.monto;
+                        totalCompareCajas += s.cajas || 0;
+                        totalCompareKilos += s.kilos || 0;
+
+                        // Agregación Comp para Rankings
+                        const ven = ensureEntity(topVendedoresMap, s.idVendedor, { nombre: s.vendedor });
+                        ven.compMonto += s.monto; ven.compCajas += s.cajas || 0; ven.compKilos += s.kilos || 0;
+
+                        const cli = ensureEntity(topClientsMap, s.cliente, { nombre: s.cliente, productosVendidos: {} });
+                        cli.compMonto += s.monto; cli.compCajas += s.cajas || 0; cli.compKilos += s.kilos || 0;
+                        if (!cli.productosVendidos[s.articulo]) cli.productosVendidos[s.articulo] = { nombre: s.articulo, mainMonto: 0, mainCajas: 0, mainKilos: 0, compMonto: 0, compCajas: 0, compKilos: 0 };
+                        cli.productosVendidos[s.articulo].compMonto += s.monto; cli.productosVendidos[s.articulo].compCajas += s.cajas || 0; cli.productosVendidos[s.articulo].compKilos += s.kilos || 0;
+
+                        const cat = ensureEntity(topCategoriesMap, s.grupo, { nombre: s.grupo, productos: {}, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() });
+                        cat.compMonto += s.monto; cat.compCajas += s.cajas || 0; cat.compKilos += s.kilos || 0;
+                        if (s.monto > 0) cat.clientesUnicosComp.add(s.idCliente);
+                        if (!cat.productos[s.articulo]) cat.productos[s.articulo] = { nombre: s.articulo, mainMonto: 0, mainCajas: 0, mainKilos: 0, compMonto: 0, compCajas: 0, compKilos: 0, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() };
+                        cat.productos[s.articulo].compMonto += s.monto; cat.productos[s.articulo].compCajas += s.cajas || 0; cat.productos[s.articulo].compKilos += s.kilos || 0;
+                        if (s.monto > 0) cat.productos[s.articulo].clientesUnicosComp.add(s.idCliente);
+
+                        const pro = ensureEntity(topProductsMap, s.articulo, { nombre: s.articulo, grupo: s.grupo, clientesUnicosMain: new Set(), clientesUnicosComp: new Set() });
+                        pro.compMonto += s.monto; pro.compCajas += s.cajas || 0; pro.compKilos += s.kilos || 0;
+                        if (s.monto > 0) pro.clientesUnicosComp.add(s.idCliente);
                     }
                 });
 
                 const maxMonthValue = Math.max(...monthlyData.map(d => Math.max(d.mainTotal, d.compareTotal)), 1);
 
-                const topVendedores = Object.values(topVendedoresMap).sort((a, b) => b.monto - a.monto);
+                const getGrowth = (m, c) => c > 0 ? ((m - c) / c) * 100 : (m > 0 ? 100 : 0);
+                const getValByMetric = (obj, pfx) => {
+                    if (metricaCompare === 'monto') return obj[pfx + 'Monto'];
+                    if (metricaCompare === 'cajas') return obj[pfx + 'Cajas'];
+                    if (metricaCompare === 'kilos') return obj[pfx + 'Kilos'];
+                    return obj[pfx + 'Monto'];
+                };
 
-                const topClientes = Object.values(topClientsMap).map(c => ({
-                    ...c,
-                    listaProductos: Object.values(c.productosVendidos).sort((a, b) => b.monto - a.monto)
-                })).sort((a, b) => b.monto - a.monto);
+                const topVendedores = Object.values(topVendedoresMap).map(v => {
+                    const m = getValByMetric(v, 'main');
+                    const c = getValByMetric(v, 'comp');
+                    return { ...v, valMain: m, valComp: c, growth: getGrowth(m, c) };
+                }).sort((a, b) => b.valMain - a.valMain);
 
-                const topCategorias = Object.values(topCategoriesMap).map(cat => ({
-                    ...cat,
-                    activacion: cat.clientesUnicos.size,
-                    listaProductos: Object.values(cat.productos).map(p => ({
-                        ...p, activacion: p.clientesUnicos.size
-                    })).sort((a, b) => b.monto - a.monto)
-                })).sort((a, b) => b.monto - a.monto);
+                const topClientes = Object.values(topClientsMap).map(cli => {
+                    const m = getValByMetric(cli, 'main');
+                    const c = getValByMetric(cli, 'comp');
+                    const listaProductos = Object.values(cli.productosVendidos).map(p => {
+                        const pm = getValByMetric(p, 'main');
+                        const pc = getValByMetric(p, 'comp');
+                        return { ...p, valMain: pm, valComp: pc, growth: getGrowth(pm, pc) };
+                    }).sort((a, b) => b.valMain - a.valMain);
+                    return { ...cli, valMain: m, valComp: c, growth: getGrowth(m, c), listaProductos };
+                }).sort((a, b) => b.valMain - a.valMain);
 
-                const topProductos = Object.values(topProductsMap).map(p => ({
-                    ...p, activacion: p.clientesUnicos.size
-                })).sort((a, b) => b.monto - a.monto);
+                const topCategorias = Object.values(topCategoriesMap).map(cat => {
+                    const m = getValByMetric(cat, 'main');
+                    const c = getValByMetric(cat, 'comp');
+                    const listaProductos = Object.values(cat.productos).map(p => {
+                        const pm = getValByMetric(p, 'main');
+                        const pc = getValByMetric(p, 'comp');
+                        return { 
+                            ...p, 
+                            valMain: pm, valComp: pc, growth: getGrowth(pm, pc),
+                            activacionMain: p.clientesUnicosMain.size,
+                            activacionComp: p.clientesUnicosComp.size
+                        };
+                    }).sort((a, b) => b.valMain - a.valMain);
+                    return { 
+                        ...cat, 
+                        valMain: m, valComp: c, growth: getGrowth(m, c), 
+                        listaProductos,
+                        activacionMain: cat.clientesUnicosMain.size,
+                        activacionComp: cat.clientesUnicosComp.size
+                    };
+                }).sort((a, b) => b.valMain - a.valMain);
 
-                const growth = totalCompareYear > 0 ? ((totalMainYear - totalCompareYear) / totalCompareYear) * 100 : 0;
+                const topProductos = Object.values(topProductsMap).map(p => {
+                    const m = getValByMetric(p, 'main');
+                    const c = getValByMetric(p, 'comp');
+                    return { 
+                        ...p, 
+                        valMain: m, valComp: c, growth: getGrowth(m, c),
+                        activacionMain: p.clientesUnicosMain.size,
+                        activacionComp: p.clientesUnicosComp.size
+                    };
+                }).sort((a, b) => b.valMain - a.valMain);
 
+                const getVal = (monto, cajas, kilos) => {
+                    if (metricaCompare === 'monto') return monto;
+                    if (metricaCompare === 'cajas') return cajas;
+                    if (metricaCompare === 'kilos') return kilos;
+                    return monto;
+                };
+
+                const valMain = getVal(totalMainYear, totalMainCajas, totalMainKilos);
+                const valComp = getVal(totalCompareYear, totalCompareCajas, totalCompareKilos);
+
+                const growth = valComp > 0 ? ((valMain - valComp) / valComp) * 100 : 0;
                 const activeMonths = monthlyData.filter(d => d.mainTotal > 0 || d.compareTotal > 0).length || 1;
                 const monthlyAvg = totalMainYear / activeMonths;
 
-                return {
+                return { 
                     monthlyData, maxMonthValue, totalMainYear, totalCompareYear,
-                    totalMainCajas, totalMainUnidades, clientesUnicos: clientesUnicosSet.size, monthlyAvg,
-                    topVendedores, topClientes, topCategorias, topProductos, growth
+                    totalMainCajas, totalMainUnidades, totalMainKilos, totalCompareKilos,
+                    clientesUnicos: clientesUnicosSet.size, growth, monthlyAvg,
+                    topVendedores, topClientes, topCategorias, topProductos
                 };
-            }, [roleSales, selectedYear, compareYear, searchCliente, searchCategoria, mainMonths, compareMonths, selectedVendedores, selectedGerentes, users]);
+            }, [roleSales, selectedYear, compareYear, searchCliente, searchCategoria, mainMonths, compareMonths, selectedVendedores, selectedGerentes, users, metricaCompare]);
 
             return (
                 <div className="space-y-6 animate-fadeIn">
@@ -3079,21 +3239,39 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             <p className="text-blue-200 text-sm font-medium">Compara el rendimiento y analiza a profundidad por clientes, categorías y productos.</p>
                         </div>
 
-                        <div className="flex flex-wrap gap-4 items-center bg-white/10 p-3 rounded-xl backdrop-blur-sm border border-white/20">
-                            <div className="flex items-center gap-2">
-                                <CalendarDays size={16} className="text-blue-300" />
-                                <span className="text-xs font-bold uppercase tracking-wider text-blue-200">Año Principal:</span>
-                                <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="bg-blue-800 border border-blue-600 text-white text-sm rounded-lg p-1.5 outline-none font-bold">
-                                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                                </select>
+                        <div className="flex flex-wrap gap-4 items-center bg-white/10 p-4 rounded-2xl backdrop-blur-md border border-white/20 shadow-xl">
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-blue-300 ml-1">Periodo Actual</span>
+                                <div className="flex items-center gap-2 bg-blue-800/50 p-2 rounded-xl border border-blue-400/30">
+                                    <CalendarDays size={16} className="text-blue-300" />
+                                    <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="bg-transparent text-white text-sm outline-none font-black cursor-pointer">
+                                        {availableYears.map(y => <option key={y} value={y} className="text-slate-900">{y}</option>)}
+                                    </select>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-blue-200">vs Comparar:</span>
-                                <select value={compareYear} onChange={e => setCompareYear(e.target.value)} className="bg-slate-700 border border-slate-600 text-white text-sm rounded-lg p-1.5 outline-none font-bold">
-                                    <option value="">Ninguno</option>
-                                    {availableYears.filter(y => y !== selectedYear).map(y => <option key={y} value={y}>{y}</option>)}
-                                </select>
+                            
+                            <div className="flex items-center justify-center pt-4">
+                                <ArrowRightLeft size={18} className="text-orange-400 opacity-70" />
                             </div>
+
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 ml-1">Periodo Comparar</span>
+                                <div className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${compareYear ? 'bg-orange-500/20 border-orange-400/50' : 'bg-slate-700/50 border-slate-600'}`}>
+                                    <History size={16} className={compareYear ? 'text-orange-400' : 'text-slate-400'} />
+                                    <select value={compareYear} onChange={e => setCompareYear(e.target.value)} className="bg-transparent text-white text-sm outline-none font-black cursor-pointer">
+                                        <option value="" className="text-slate-900">Desactivar Comparación</option>
+                                        {availableYears.map(y => <option key={y} value={y} className="text-slate-900">{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            {!compareYear && (
+                                <button onClick={() => {
+                                    setCompareYear(selectedYear);
+                                    // Si no hay meses seleccionados en comparar, poner todos o el anterior
+                                    if (compareMonths.length === 0) setCompareMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+                                }} className="mt-4 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black rounded-lg shadow-lg shadow-orange-900/20 transition-all uppercase tracking-tighter">Activar Comparación</button>
+                            )}
                         </div>
                     </div>
 
@@ -3185,8 +3363,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 <CalendarDays size={18} className="text-indigo-600" /> Meses ({selectedYear || 'Principal'}):
                             </div>
                             <div className="flex flex-wrap gap-2 flex-1">
-                                <button onClick={() => setMainMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${mainMonths.length === 12 ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Todos</button>
-                                <button onClick={() => setMainMonths([])} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${mainMonths.length === 0 ? 'bg-red-500 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Ninguno</button>
+                                <button onClick={() => setMainMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])} className={`px-2 py-1 text-[10px] font-black rounded-lg transition-colors ${mainMonths.length === 12 ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>TODOS</button>
+                                <button onClick={() => setMainMonths([])} className={`px-2 py-1 text-[10px] font-black rounded-lg transition-colors ${mainMonths.length === 0 ? 'bg-red-500 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>NINGUNO</button>
+                                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+                                <button onClick={() => setMainMonths([0, 1, 2])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">T1</button>
+                                <button onClick={() => setMainMonths([3, 4, 5])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">T2</button>
+                                <button onClick={() => setMainMonths([6, 7, 8])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">T3</button>
+                                <button onClick={() => setMainMonths([9, 10, 11])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">T4</button>
+                                <div className="w-px h-6 bg-slate-200 mx-1"></div>
                                 {monthNames.map((mName, i) => (
                                     <button key={i} onClick={() => toggleMainMonth(i)} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${mainMonths.includes(i) ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{mName}</button>
                                 ))}
@@ -3195,15 +3379,21 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
                         {/* Selector Dinámico de Meses Comparativo (Si aplica) */}
                         {compareYear && (
-                            <div className="flex flex-col md:flex-row md:items-center gap-4 pt-2 border-t border-slate-50">
-                                <div className="text-sm font-black text-slate-500 flex items-center gap-2 uppercase tracking-wider min-w-[140px]">
-                                    <CalendarDays size={18} className="text-slate-400" /> Comparar ({compareYear}):
+                            <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 rounded-xl bg-orange-50/50 border border-orange-100 shadow-inner">
+                                <div className="text-xs font-black text-orange-700 flex items-center gap-2 uppercase tracking-wider min-w-[140px]">
+                                    <ArrowRightLeft size={16} className="text-orange-500" /> Meses Comparar ({compareYear}):
                                 </div>
                                 <div className="flex flex-wrap gap-2 flex-1">
-                                    <button onClick={() => setCompareMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${compareMonths.length === 12 ? 'bg-slate-600 text-white shadow-sm' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Todos</button>
-                                    <button onClick={() => setCompareMonths([])} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${compareMonths.length === 0 ? 'bg-red-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Ninguno</button>
+                                    <button onClick={() => setCompareMonths([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])} className={`px-2 py-1 text-[10px] font-black rounded-lg transition-colors ${compareMonths.length === 12 ? 'bg-orange-600 text-white shadow-sm' : 'bg-white text-orange-400 hover:bg-orange-100 border border-orange-200'}`}>TODOS</button>
+                                    <button onClick={() => setCompareMonths([])} className={`px-2 py-1 text-[10px] font-black rounded-lg transition-colors ${compareMonths.length === 0 ? 'bg-red-500 text-white shadow-sm' : 'bg-white text-orange-400 hover:bg-orange-100 border border-orange-200'}`}>NINGUNO</button>
+                                    <div className="w-px h-6 bg-orange-200 mx-1"></div>
+                                    <button onClick={() => setCompareMonths([0, 1, 2])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-white text-orange-600 hover:bg-orange-50 border border-orange-100 transition-colors">T1</button>
+                                    <button onClick={() => setCompareMonths([3, 4, 5])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-white text-orange-600 hover:bg-orange-50 border border-orange-100 transition-colors">T2</button>
+                                    <button onClick={() => setCompareMonths([6, 7, 8])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-white text-orange-600 hover:bg-orange-50 border border-orange-100 transition-colors">T3</button>
+                                    <button onClick={() => setCompareMonths([9, 10, 11])} className="px-2 py-1 text-[10px] font-black rounded-lg bg-white text-orange-600 hover:bg-orange-50 border border-orange-100 transition-colors">T4</button>
+                                    <div className="w-px h-6 bg-orange-200 mx-1"></div>
                                     {monthNames.map((mName, i) => (
-                                        <button key={i} onClick={() => toggleCompareMonth(i)} className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors ${compareMonths.includes(i) ? 'bg-slate-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>{mName}</button>
+                                        <button key={i} onClick={() => toggleCompareMonth(i)} className={`px-2 py-1 text-xs font-bold rounded-lg transition-all transform hover:scale-105 ${compareMonths.includes(i) ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-orange-400 hover:bg-orange-50 border border-orange-200'}`}>{mName}</button>
                                     ))}
                                 </div>
                             </div>
@@ -3211,25 +3401,33 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
                         <div className="w-full h-px bg-slate-100"></div>
 
-                        {/* Selector de Tendencias Originales con DataList */}
                         <div className="flex flex-wrap gap-4 items-center">
                             <div className="text-sm font-black text-slate-700 flex items-center gap-2 w-full md:w-auto uppercase tracking-wider min-w-[140px]">
-                                <Filter size={18} className="text-indigo-600" /> Tendencia:
+                                <TrendingUp size={18} className="text-indigo-600" /> Comparar por:
                             </div>
-                            <div className="flex-1 min-w-[200px]">
-                                <input type="text" list="clientesList" placeholder="Escribir o Seleccionar Cliente..." value={searchCliente} onChange={(e) => setSearchCliente(e.target.value)} className="w-full text-sm border-2 border-slate-200 rounded-xl p-2.5 outline-none focus:border-indigo-500 bg-slate-50 focus:bg-white transition-colors font-medium" />
+                            <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+                                <button onClick={() => setMetricaCompare('monto')} className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all ${metricaCompare === 'monto' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>Valores ($)</button>
+                                <button onClick={() => setMetricaCompare('cajas')} className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all ${metricaCompare === 'cajas' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>Cajas</button>
+                                <button onClick={() => setMetricaCompare('kilos')} className={`px-4 py-1.5 rounded-lg font-bold text-xs transition-all ${metricaCompare === 'kilos' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>Kilos</button>
+                            </div>
+                            <div className="w-px h-8 bg-slate-100 hidden md:block mx-2"></div>
+                            <div className="text-sm font-black text-slate-700 flex items-center gap-2 uppercase tracking-wider">
+                                <Filter size={18} className="text-indigo-600" /> Filtros:
+                            </div>
+                            <div className="flex-1 min-w-[180px]">
+                                <input type="text" list="clientesList" placeholder="Cliente..." value={searchCliente} onChange={(e) => setSearchCliente(e.target.value)} className="w-full text-xs border-2 border-slate-200 rounded-xl p-2 outline-none focus:border-indigo-500 bg-slate-50 font-bold" />
                                 <datalist id="clientesList">
                                     {uniqueClientes.map((c, i) => <option key={i} value={c} />)}
                                 </datalist>
                             </div>
-                            <div className="flex-1 min-w-[200px]">
-                                <input type="text" list="categoriasList" placeholder="Escribir o Seleccionar Categoría..." value={searchCategoria} onChange={(e) => setSearchCategoria(e.target.value)} className="w-full text-sm border-2 border-slate-200 rounded-xl p-2.5 outline-none focus:border-indigo-500 bg-slate-50 focus:bg-white transition-colors font-medium" />
+                            <div className="flex-1 min-w-[180px]">
+                                <input type="text" list="categoriasList" placeholder="Categoría..." value={searchCategoria} onChange={(e) => setSearchCategoria(e.target.value)} className="w-full text-xs border-2 border-slate-200 rounded-xl p-2 outline-none focus:border-indigo-500 bg-slate-50 font-bold" />
                                 <datalist id="categoriasList">
                                     {uniqueCategorias.map((c, i) => <option key={i} value={c} />)}
                                 </datalist>
                             </div>
                             {(searchCliente || searchCategoria) && (
-                                <button onClick={() => { setSearchCliente(''); setSearchCategoria(''); }} className="text-xs font-bold text-red-600 hover:text-red-800 px-4 py-2.5 border-2 border-red-200 rounded-xl hover:bg-red-50 transition-colors whitespace-nowrap">Limpiar</button>
+                                <button onClick={() => { setSearchCliente(''); setSearchCategoria(''); }} className="text-[10px] font-black text-red-600 hover:text-red-800 px-3 py-2 border-2 border-red-100 rounded-xl hover:bg-red-50 transition-colors whitespace-nowrap">Limpiar</button>
                             )}
                         </div>
                     </div>
@@ -3256,7 +3454,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             {compareYear ? (
                                 <div className={`p-6 rounded-2xl shadow-sm border flex flex-col justify-center ${historicalData.growth >= 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                                     <p className="text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                                        {historicalData.growth >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />} Crecimiento Interanual
+                                        {historicalData.growth >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />} Crecimiento ({metricaCompare === 'monto' ? 'USD' : metricaCompare === 'cajas' ? 'Cajas' : 'Kilos'})
                                     </p>
                                     <h3 className="text-4xl font-black">{historicalData.growth > 0 ? '+' : ''}{historicalData.growth.toFixed(1)}%</h3>
                                 </div>
@@ -3268,9 +3466,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             )}
                         </div>
 
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                             <MiniCardKPI title="Cajas Movilizadas" value={historicalData.totalMainCajas.toLocaleString(undefined, { maximumFractionDigits: 2 })} subValue={`Total en meses activos`} icon={Box} colorClass="bg-yellow-100 text-yellow-700" />
                             <MiniCardKPI title="Unidades Vendidas" value={historicalData.totalMainUnidades.toLocaleString(undefined, { maximumFractionDigits: 2 })} subValue={`Total en meses activos`} icon={Package} colorClass="bg-orange-100 text-orange-700" />
+                            <MiniCardKPI title="Kilos/Litros" value={`${historicalData.totalMainKilos.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`} subValue={compareYear ? `vs ${historicalData.totalCompareKilos.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg` : "Volumen total"} icon={Weight} colorClass="bg-purple-100 text-purple-700" />
                             <MiniCardKPI title="Clientes Activos" value={historicalData.clientesUnicos.toLocaleString()} subValue={`Cartera acumulada`} icon={Users} colorClass="bg-emerald-100 text-emerald-700" />
                             <MiniCardKPI title="Promedio Mensual" value={`$${historicalData.monthlyAvg.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`} subValue="Ingresos por mes activo" icon={Calculator} colorClass="bg-indigo-100 text-indigo-700" />
                         </div>
@@ -3300,8 +3499,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                     <div key={i} className="flex-1 flex flex-col items-center h-full relative group">
                                         <div className="absolute -top-20 bg-slate-800 text-white text-[11px] p-3 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none whitespace-nowrap">
                                             <p className="font-black text-orange-400 border-b border-slate-600 pb-1 mb-1.5">{d.month}</p>
-                                            <div className="flex justify-between gap-4"><span className="font-bold">{selectedYear}:</span> <span>${d.mainTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
-                                            {compareYear && <div className="flex justify-between gap-4 text-slate-300"><span className="font-bold">{compareYear}:</span> <span>${d.compareTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>}
+                                            <div className="flex justify-between gap-4"><span className="font-bold">{selectedYear}:</span> <span>${d.mainTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })} | {d.mainKilos.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg</span></div>
+                                            {compareYear && <div className="flex justify-between gap-4 text-slate-300"><span className="font-bold">{compareYear}:</span> <span>${d.compareTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })} | {d.compareKilos.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg</span></div>}
                                         </div>
 
                                         <div className="w-full flex items-end justify-center gap-1 h-full z-0">
@@ -3330,7 +3529,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             <div className="flex h-8 rounded-xl overflow-hidden mb-5 shadow-inner border border-slate-200">
                                 {historicalData.topCategorias.slice(0, 6).map((cat, idx) => {
                                     const colors = ['bg-blue-600', 'bg-indigo-500', 'bg-purple-500', 'bg-pink-500', 'bg-rose-500', 'bg-orange-500'];
-                                    const pct = historicalData.totalMainYear > 0 ? (cat.monto / historicalData.totalMainYear) * 100 : 0;
+                                    const pct = historicalData.totalMainYear > 0 ? (cat.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                     return <div key={idx} className={`${colors[idx % colors.length]} h-full transition-all hover:opacity-80 flex items-center justify-center overflow-hidden`} style={{ width: `${pct}%` }} title={`${cat.nombre}: ${pct.toFixed(1)}%`}>
                                         {pct > 5 && <span className="text-[10px] font-black text-white mix-blend-overlay px-1 truncate">{cat.nombre}</span>}
                                     </div>
@@ -3340,7 +3539,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 {historicalData.topCategorias.slice(0, 6).map((cat, idx) => {
                                     const colors = ['text-blue-600', 'text-indigo-500', 'text-purple-500', 'text-pink-500', 'text-rose-500', 'text-orange-500'];
                                     const dots = ['bg-blue-600', 'bg-indigo-500', 'bg-purple-500', 'bg-pink-500', 'bg-rose-500', 'bg-orange-500'];
-                                    const pct = historicalData.totalMainYear > 0 ? (cat.monto / historicalData.totalMainYear) * 100 : 0;
+                                    const pct = historicalData.totalMainYear > 0 ? (cat.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                     return (
                                         <div key={idx} className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 shadow-sm">
                                             <div className={`w-3 h-3 rounded-full ${dots[idx % dots.length]}`}></div>
@@ -3360,7 +3559,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col max-h-[500px]">
                                 <div className="bg-slate-50 p-5 border-b border-slate-100 sticky top-0 z-10">
                                     <h3 className="font-black text-indigo-900 flex items-center gap-3 text-lg">
-                                        <Users size={20} className="text-orange-500" /> Ranking de Vendedores ({selectedYear})
+                                        <Users size={20} className="text-orange-500" /> Ranking de Vendedores {!compareYear ? `(${selectedYear})` : `(${selectedYear} vs ${compareYear})`}
                                     </h3>
                                 </div>
                                 <div className="overflow-y-auto p-0">
@@ -3368,13 +3567,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                         <thead className="bg-white text-slate-400 text-[10px] uppercase font-bold sticky top-0 z-10 shadow-sm">
                                             <tr>
                                                 <th className="px-6 py-3">Ejecutivo</th>
-                                                <th className="px-4 py-3 text-right">Volumen</th>
-                                                <th className="px-6 py-3 text-right">Total ($)</th>
+                                                <th className="px-4 py-3 text-right">{getPeriodLabel(selectedYear, mainMonths)}</th>
+                                                <th className="px-4 py-3 text-center">% Var</th>
+                                                <th className="px-6 py-3 text-right">{getPeriodLabel(compareYear, compareMonths)}</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {historicalData.topVendedores.slice(0, 150).map((v, idx) => {
-                                                const pct = historicalData.totalMainYear > 0 ? (v.monto / historicalData.totalMainYear) * 100 : 0;
+                                                const pct = historicalData.totalMainYear > 0 ? (v.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                                 return (
                                                     <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                                         <td className="px-6 py-3">
@@ -3386,13 +3586,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3 text-right">
-                                                            <p className="font-bold text-slate-600 text-xs">{Number(v.cajas).toLocaleString(undefined, { maximumFractionDigits: 1 })} cj</p>
-                                                            <p className="font-medium text-slate-400 text-[10px] mt-0.5">{Number(v.unidades).toLocaleString(undefined, { maximumFractionDigits: 0 })} un</p>
+                                                        <td className="px-4 py-3 text-right font-black text-blue-900">
+                                                            {metricaCompare === 'monto' ? '$' : ''}{v.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                         </td>
-                                                        <td className="px-6 py-3 text-right">
-                                                            <p className="font-black text-blue-900">${v.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                                            <p className="text-[10px] font-bold text-emerald-600 mt-0.5">{pct.toFixed(1)}% del total</p>
+                                                        <td className={`px-4 py-3 text-center font-black ${v.growth > 0 ? 'text-green-600' : v.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                            {v.growth > 0 ? '+' : ''}{v.growth.toFixed(1)}%
+                                                        </td>
+                                                        <td className="px-6 py-3 text-right font-bold text-slate-400">
+                                                            {metricaCompare === 'monto' ? '$' : ''}{v.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                         </td>
                                                     </tr>
                                                 )
@@ -3414,16 +3615,17 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             <div className="overflow-y-auto p-0">
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-white text-slate-400 text-[10px] uppercase font-bold sticky top-0 z-10 shadow-sm">
-                                        <tr>
-                                            <th className="px-6 py-3">Nombre Cliente</th>
-                                            <th className="px-4 py-3 text-right">Cajas</th>
-                                            <th className="px-6 py-3 text-right">Total ($)</th>
-                                        </tr>
+                                            <tr>
+                                                <th className="px-6 py-3">Nombre Cliente</th>
+                                                <th className="px-4 py-3 text-right">{getPeriodLabel(selectedYear, mainMonths)}</th>
+                                                <th className="px-4 py-3 text-center">% Var</th>
+                                                <th className="px-6 py-3 text-right">{getPeriodLabel(compareYear, compareMonths)}</th>
+                                            </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {historicalData.topClientes.slice(0, 150).map((c, idx) => {
                                             const isExpanded = expandedHistClient === c.nombre;
-                                            const pct = historicalData.totalMainYear > 0 ? (c.monto / historicalData.totalMainYear) * 100 : 0;
+                                            const pct = historicalData.totalMainYear > 0 ? (c.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                             return (
                                                 <React.Fragment key={idx}>
                                                     <tr onClick={() => setExpandedHistClient(isExpanded ? null : c.nombre)} className="hover:bg-blue-50/50 transition-colors cursor-pointer group">
@@ -3436,10 +3638,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3 text-right font-medium text-slate-500">{Number(c.cajas).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                                                        <td className="px-6 py-3 text-right">
-                                                            <span className="font-black text-blue-900 block">${c.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                            <span className="text-[10px] font-bold text-slate-400">{pct.toFixed(1)}%</span>
+                                                        <td className="px-4 py-3 text-right font-black text-indigo-900">
+                                                            {metricaCompare === 'monto' ? '$' : ''}{c.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                        </td>
+                                                        <td className={`px-4 py-3 text-center font-black ${c.growth > 0 ? 'text-green-600' : c.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                            {c.growth > 0 ? '+' : ''}{c.growth.toFixed(1)}%
+                                                        </td>
+                                                        <td className="px-6 py-3 text-right font-bold text-slate-400">
+                                                            {metricaCompare === 'monto' ? '$' : ''}{c.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                         </td>
                                                     </tr>
                                                     {isExpanded && (
@@ -3451,16 +3657,24 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                         <thead className="text-slate-400 border-b border-slate-200">
                                                                             <tr>
                                                                                 <th className="text-left pb-2">Producto Específico</th>
-                                                                                <th className="text-right pb-2">Cajas</th>
-                                                                                <th className="text-right pb-2">Monto ($)</th>
+                                                                                <th className="text-right pb-2">Actual</th>
+                                                                                <th className="text-center pb-2">% Var</th>
+                                                                                <th className="text-right pb-2">Anterior</th>
                                                                             </tr>
                                                                         </thead>
                                                                         <tbody className="divide-y divide-slate-200/50">
                                                                             {c.listaProductos.slice(0, 50).map((p, pIdx) => (
                                                                                 <tr key={pIdx} className="hover:bg-white transition-colors">
                                                                                     <td className="py-2 font-medium text-slate-700">{p.nombre}</td>
-                                                                                    <td className="py-2 text-right text-slate-500">{Number(p.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                                                                                    <td className="py-2 text-right font-bold text-slate-800">${p.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                                                    <td className="py-2 text-right font-black text-indigo-900">
+                                                                                        {metricaCompare === 'monto' ? '$' : ''}{p.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                                                    </td>
+                                                                                    <td className={`py-2 text-center font-black ${p.growth > 0 ? 'text-green-600' : p.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                        {p.growth > 0 ? '+' : ''}{p.growth.toFixed(1)}%
+                                                                                    </td>
+                                                                                    <td className="py-2 text-right font-bold text-slate-400">
+                                                                                        {metricaCompare === 'monto' ? '$' : ''}{p.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                                                    </td>
                                                                                 </tr>
                                                                             ))}
                                                                         </tbody>
@@ -3490,31 +3704,28 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                     <thead className="bg-white text-slate-400 text-[10px] uppercase font-bold sticky top-0 z-10 shadow-sm">
                                         <tr>
                                             <th className="px-6 py-3">Artículo</th>
-                                            <th className="px-4 py-3 text-center">Línea</th>
-                                            <th className="px-4 py-3 text-center">Activación</th>
-                                            <th className="px-4 py-3 text-right">Cajas</th>
-                                            <th className="px-6 py-3 text-right">Total ($)</th>
+                                            <th className="px-4 py-3 text-right">{getPeriodLabel(selectedYear, mainMonths)}</th>
+                                            <th className="px-4 py-3 text-center">% Var</th>
+                                            <th className="px-6 py-3 text-right">{getPeriodLabel(compareYear, compareMonths)}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {historicalData.topProductos.slice(0, 150).map((prod, idx) => {
-                                            const pct = historicalData.totalMainYear > 0 ? (prod.monto / historicalData.totalMainYear) * 100 : 0;
+                                            const pct = historicalData.totalMainYear > 0 ? (prod.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                             return (
                                                 <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                                     <td className="px-6 py-3 font-bold text-slate-700 text-xs">
                                                         <span className="truncate max-w-[150px] block" title={prod.nombre}>{idx + 1}. {prod.nombre}</span>
                                                         <div className="w-full max-w-[100px] bg-slate-100 h-1.5 rounded-full mt-1.5"><div className="bg-purple-400 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }}></div></div>
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        <span className="text-[9px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">{prod.grupo}</span>
+                                                    <td className="px-4 py-3 text-right font-black text-slate-800">
+                                                        {metricaCompare === 'monto' ? '$' : ''}{prod.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center font-bold text-blue-600 text-xs">
-                                                        <div className="flex items-center justify-center gap-1"><Users size={12} /> {prod.activacion}</div>
+                                                    <td className={`px-4 py-3 text-center font-black text-xs ${prod.growth > 0 ? 'text-green-600' : prod.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                        {prod.growth > 0 ? '+' : ''}{prod.growth.toFixed(1)}%
                                                     </td>
-                                                    <td className="px-4 py-3 text-right font-medium text-slate-500">{Number(prod.cajas).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                                                    <td className="px-6 py-3 text-right">
-                                                        <span className="font-black text-blue-900 block">${prod.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        <span className="text-[10px] font-bold text-slate-400">{pct.toFixed(1)}%</span>
+                                                    <td className="px-6 py-3 text-right font-bold text-slate-400">
+                                                        {metricaCompare === 'monto' ? '$' : ''}{prod.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                     </td>
                                                 </tr>
                                             )
@@ -3540,14 +3751,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 <thead className="bg-white text-slate-400 text-xs uppercase font-bold border-b border-slate-100">
                                     <tr>
                                         <th className="px-6 py-4 w-1/2">Categoría / Línea</th>
-                                        <th className="px-6 py-4 text-center">Activación (Clientes)</th>
-                                        <th className="px-6 py-4 text-right">Cajas Totales</th>
-                                        <th className="px-6 py-4 text-right">Monto Total ($)</th>
+                                        <th className="px-4 py-4 text-right">{getPeriodLabel(selectedYear, mainMonths)}</th>
+                                        <th className="px-4 py-4 text-center">% Var</th>
+                                        <th className="px-6 py-4 text-right">{getPeriodLabel(compareYear, compareMonths)}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {historicalData.topCategorias.slice(0, 150).map((cat, idx) => {
-                                        const pct = historicalData.totalMainYear > 0 ? (cat.monto / historicalData.totalMainYear) * 100 : 0;
+                                        const pct = historicalData.totalMainYear > 0 ? (cat.mainMonto / historicalData.totalMainYear) * 100 : 0;
                                         const isExpanded = expandedHistCategory === cat.nombre;
                                         return (
                                             <React.Fragment key={idx}>
@@ -3562,11 +3773,15 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                             <div className="w-full max-w-[250px] bg-slate-100 h-2 rounded-full"><div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }}></div></div>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/30">
-                                                        <div className="flex items-center justify-center gap-1.5"><Users size={16} /> {cat.activacion}</div>
+                                                    <td className="px-4 py-4 text-right font-black text-indigo-900">
+                                                        {metricaCompare === 'monto' ? '$' : ''}{cat.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
                                                     </td>
-                                                    <td className="px-6 py-4 text-right font-medium text-slate-600">{Number(cat.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj</td>
-                                                    <td className="px-6 py-4 text-right font-black text-indigo-900 text-base">${cat.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                    <td className={`px-4 py-4 text-center font-black ${cat.growth > 0 ? 'text-green-600' : cat.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                        {cat.growth > 0 ? '+' : ''}{cat.growth.toFixed(1)}%
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right font-bold text-slate-400">
+                                                        {metricaCompare === 'monto' ? '$' : ''}{cat.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                    </td>
                                                 </tr>
                                                 {isExpanded && (
                                                     <tr>
@@ -3579,18 +3794,24 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                     <thead className="text-slate-500 text-xs tracking-wider">
                                                                         <tr>
                                                                             <th className="text-left pb-3 font-bold">Detalle del Producto</th>
-                                                                            <th className="text-center pb-3 font-bold">Activación</th>
-                                                                            <th className="text-right pb-3 font-bold">Cajas Aportadas</th>
-                                                                            <th className="text-right pb-3 font-bold">Monto Generado ($)</th>
+                                                                            <th className="text-right pb-3 font-bold">Actual</th>
+                                                                            <th className="text-center pb-3 font-bold">% Var</th>
+                                                                            <th className="text-right pb-3 font-bold">Anterior</th>
                                                                         </tr>
                                                                     </thead>
                                                                     <tbody className="divide-y divide-slate-200">
                                                                         {cat.listaProductos.slice(0, 50).map((p, pIdx) => (
                                                                             <tr key={pIdx} className="hover:bg-white transition-colors">
                                                                                 <td className="py-2.5 font-medium text-slate-700 text-xs">{p.nombre}</td>
-                                                                                <td className="py-2.5 text-center font-bold text-blue-600 text-[11px]"><div className="flex items-center justify-center gap-1"><Users size={12} /> {p.activacion}</div></td>
-                                                                                <td className="py-2.5 text-right text-slate-600 text-xs">{Number(p.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                                                                                <td className="py-2.5 text-right font-bold text-slate-800 text-xs">${p.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                                                <td className="py-2.5 text-right font-black text-indigo-900 text-xs">
+                                                                                    {metricaCompare === 'monto' ? '$' : ''}{p.valMain.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                                                </td>
+                                                                                <td className={`py-2.5 text-center font-black text-[11px] ${p.growth > 0 ? 'text-green-600' : p.growth < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                    {p.growth > 0 ? '+' : ''}{p.growth.toFixed(1)}%
+                                                                                </td>
+                                                                                <td className="py-2.5 text-right font-bold text-slate-400 text-xs">
+                                                                                    {metricaCompare === 'monto' ? '$' : ''}{p.valComp.toLocaleString(undefined, { maximumFractionDigits: metricaCompare === 'monto' ? 2 : 1 })}
+                                                                                </td>
                                                                             </tr>
                                                                         ))}
                                                                     </tbody>
@@ -3646,26 +3867,32 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (searchProducto) mySales = mySales.filter(s => s.articulo.toLowerCase().includes(searchProducto.toLowerCase()));
                 if (searchGrupo) mySales = mySales.filter(s => s.grupo.toLowerCase().includes(searchGrupo.toLowerCase()));
 
-                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0;
-                const clientsMap = {}; const gruposMap = {}; const productosMap = {};
+                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0; let totalKilos = 0;
+                const clientsMap = {}; const gruposMap = {}; const subgruposMap = {}; const productosMap = {};
                 const productosUnicos = new Set(); const facturasUnicas = new Set();
 
                 mySales.forEach(sale => {
-                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0;
+                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0; totalKilos += sale.kilos || 0;
                     if (sale.monto > 0) productosUnicos.add(sale.articulo);
                     if (sale.numero && sale.tipoDoc !== 'DV') facturasUnicas.add(sale.numero);
 
-                    if (!clientsMap[sale.idCliente]) clientsMap[sale.idCliente] = { nombre: sale.cliente, monto: 0, unidades: 0, cajas: 0, articulos: [] };
-                    clientsMap[sale.idCliente].monto += sale.monto; clientsMap[sale.idCliente].unidades += sale.unidades; clientsMap[sale.idCliente].cajas += sale.cajas || 0;
+                    if (!clientsMap[sale.idCliente]) clientsMap[sale.idCliente] = { nombre: sale.cliente, monto: 0, unidades: 0, cajas: 0, kilos: 0, articulos: [] };
+                    clientsMap[sale.idCliente].monto += sale.monto; clientsMap[sale.idCliente].unidades += sale.unidades; clientsMap[sale.idCliente].cajas += sale.cajas || 0; clientsMap[sale.idCliente].kilos += sale.kilos || 0;
                     clientsMap[sale.idCliente].articulos.push(sale);
 
-                    if (!gruposMap[sale.grupo]) gruposMap[sale.grupo] = { monto: 0, unidades: 0, cajas: 0, detalle: [], clientesUnicos: new Set() };
-                    gruposMap[sale.grupo].monto += sale.monto; gruposMap[sale.grupo].unidades += sale.unidades; gruposMap[sale.grupo].cajas += sale.cajas || 0;
+                    if (!gruposMap[sale.grupo]) gruposMap[sale.grupo] = { monto: 0, unidades: 0, cajas: 0, kilos: 0, detalle: [], clientesUnicos: new Set() };
+                    gruposMap[sale.grupo].monto += sale.monto; gruposMap[sale.grupo].unidades += sale.unidades; gruposMap[sale.grupo].cajas += sale.cajas || 0; gruposMap[sale.grupo].kilos += sale.kilos || 0;
                     gruposMap[sale.grupo].detalle.push(sale);
                     if (sale.monto > 0) gruposMap[sale.grupo].clientesUnicos.add(sale.idCliente);
 
-                    if (!productosMap[sale.articulo]) productosMap[sale.articulo] = { nombre: sale.articulo, grupo: sale.grupo, cajas: 0, unidades: 0, monto: 0, clientesUnicos: new Set() };
+                    if (!subgruposMap[sale.subgrupo]) subgruposMap[sale.subgrupo] = { monto: 0, unidades: 0, cajas: 0, kilos: 0, detalle: [], clientesUnicos: new Set() };
+                    subgruposMap[sale.subgrupo].monto += sale.monto; subgruposMap[sale.subgrupo].unidades += sale.unidades; subgruposMap[sale.subgrupo].cajas += sale.cajas || 0; subgruposMap[sale.subgrupo].kilos += sale.kilos || 0;
+                    subgruposMap[sale.subgrupo].detalle.push(sale);
+                    if (sale.monto > 0) subgruposMap[sale.subgrupo].clientesUnicos.add(sale.idCliente);
+
+                    if (!productosMap[sale.articulo]) productosMap[sale.articulo] = { nombre: sale.articulo, grupo: sale.grupo, cajas: 0, unidades: 0, monto: 0, kilos: 0, clientesUnicos: new Set() };
                     productosMap[sale.articulo].cajas += sale.cajas || 0; productosMap[sale.articulo].unidades += sale.unidades || 0; productosMap[sale.articulo].monto += sale.monto || 0;
+                    productosMap[sale.articulo].kilos += sale.kilos || 0;
                     productosMap[sale.articulo].clientesUnicos.add(sale.idCliente);
                 });
 
@@ -3676,11 +3903,15 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 const listaProductos = Object.values(productosMap).map(p => ({ ...p, cantidadClientes: p.clientesUnicos.size })).sort((a, b) => b.monto - a.monto);
                 const nombresClientesActivos = new Set(Object.values(clientsMap).filter(c => c.monto > 0).map(c => normalizeName(c.nombre)));
 
-                return { totalMonto, totalUnidades, totalCajas, totalPedidos, activeClientsCount, clientsMap, gruposMap, listaProductos, productos: productosUnicos.size, precioPromedio, ticketPromedio, nombresClientesActivos };
+                return { totalMonto, totalUnidades, totalCajas, totalKilos, totalPedidos, activeClientsCount, clientsMap, gruposMap, subgruposMap, listaProductos, productos: productosUnicos.size, precioPromedio, ticketPromedio, nombresClientesActivos };
             }, [sales, normUserId, userId, searchCliente, searchProducto, searchGrupo, currentMonthStr]);
 
             const carteraConEstado = useMemo(() => {
-                let list = cartera.filter(c => normalizeId(c.idVendedor) === normUserId || c.vendedorNombre.includes(userId) || c.vendedorNombre.includes(normUserId));
+                let list = cartera.filter(c => {
+                    const vid = normalizeId(c.idVendedor);
+                    const vname = String(c.vendedorNombre || "").toUpperCase();
+                    return vid === normUserId || vname.includes(String(userId).toUpperCase()) || vname.includes(normUserId.toUpperCase());
+                });
 
                 let listConEstado = list.map(c => ({
                     ...c,
@@ -3860,7 +4091,6 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 {Object.entries(stats.gruposMap).map(([grupoRaw, data]) => {
                                     const grupo = String(grupoRaw).trim().toUpperCase();
 
-                                    // Búsqueda inteligente de la meta (ignora mayúsculas/minúsculas y espacios extra)
                                     let metaGrupoObj = { monto: 0, cajas: 0 };
                                     if (myMeta.grupos) {
                                         const metaKey = Object.keys(myMeta.grupos).find(k => String(k).trim().toUpperCase() === grupo);
@@ -3939,6 +4169,60 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                     </div>
                                 )}
                             </div>
+
+                            <div className="mt-8 pt-8 border-t border-slate-100">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xl font-black text-indigo-900 flex items-center gap-3">
+                                        <TrendingUp className="text-orange-500" /> Activación por Subgrupos
+                                    </h3>
+                                </div>
+                                <div className="space-y-4">
+                                    {(() => {
+                                        const allSubgroups = new Set(Object.keys(stats.subgruposMap || {}));
+                                        if (myMeta && myMeta.subgrupos) {
+                                            Object.keys(myMeta.subgrupos).forEach(sg => {
+                                                if (sg && sg !== 'null' && sg !== 'undefined') allSubgroups.add(sg);
+                                            });
+                                        }
+                                        
+                                        return Array.from(allSubgroups).sort((a, b) => {
+                                            const countA = stats.subgruposMap[a]?.clientesUnicos.size || 0;
+                                            const countB = stats.subgruposMap[b]?.clientesUnicos.size || 0;
+                                            return countB - countA;
+                                        }).map(sgRaw => {
+                                            const sg = String(sgRaw).trim().toUpperCase();
+                                            const data = stats.subgruposMap[sgRaw] || { clientesUnicos: new Set() };
+                                            
+                                            let metaSgObj = { clientes: 0 };
+                                            if (myMeta.subgrupos) {
+                                                const metaKey = Object.keys(myMeta.subgrupos).find(k => String(k).trim().toUpperCase() === sg);
+                                                if (metaKey) metaSgObj = myMeta.subgrupos[metaKey];
+                                            }
+                                            const metaSgClientes = metaSgObj.clientes || 0;
+                                            const currentAct = data.clientesUnicos.size;
+                                            const pctAct = metaSgClientes > 0 ? Math.min((currentAct / metaSgClientes) * 100, 100) : 0;
+
+                                            return (
+                                                <div key={sgRaw} className="bg-slate-50/50 p-4 rounded-xl border border-slate-100 transition-all hover:border-blue-200">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div className="flex flex-col">
+                                                            <span className="font-black text-slate-800 text-sm uppercase tracking-wide">{sgRaw}</span>
+                                                            <span className="text-[10px] font-bold text-slate-400 mt-0.5">OBJETIVO: {metaSgClientes} CLIENTES</span>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-lg font-black text-blue-600">{currentAct} <span className="text-xs text-slate-400">/ {metaSgClientes}</span></span>
+                                                            <span className={`block text-[10px] font-black ${pctAct >= 100 ? 'text-green-600' : 'text-orange-500'}`}>{pctAct.toFixed(1)}% CUMPLIMIENTO</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
+                                                        <div className={`h-full transition-all duration-1000 ${pctAct >= 100 ? 'bg-green-500' : pctAct >= 50 ? 'bg-blue-500' : 'bg-orange-500'}`} style={{ width: `${pctAct}%` }}></div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -3963,7 +4247,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                             <div className="flex items-center gap-6">
                                                 <div className="text-right hidden sm:block">
                                                     <p className="font-black text-blue-900 text-base">${cliente.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                                    <p className="text-[11px] text-slate-500 font-bold mt-0.5">{Number(cliente.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(cliente.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un</p>
+                                                    <p className="text-[11px] text-slate-500 font-bold mt-0.5">{Number(cliente.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(cliente.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un | {Number(cliente.kilos || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg</p>
                                                 </div>
                                                 <div className={`p-2 rounded-full transition-colors ${expandedClient === id ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>
                                                     {expandedClient === id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -4028,7 +4312,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                             <th className="px-6 py-4">Artículo</th>
                                             <th className="px-4 py-4 text-center">Línea</th>
                                             <th className="px-4 py-4 text-center">Clts</th>
-                                            <th className="px-4 py-4 text-right">Caj</th>
+                                            <th className="px-4 py-4 text-right">Caj | Kg</th>
                                             <th className="px-4 py-4 text-right">Uds</th>
                                             <th className="px-6 py-4 text-right text-blue-900">Total ($)</th>
                                         </tr>
@@ -4048,7 +4332,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                     {prod.cantidadClientes}
                                                 </td>
                                                 <td className="px-4 py-3 text-right font-bold text-slate-500">
-                                                    {Number(prod.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                                    {Number(prod.cajas).toLocaleString(undefined, { maximumFractionDigits: 1 })} | {Number(prod.kilos || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}
                                                 </td>
                                                 <td className="px-4 py-3 text-right font-bold text-slate-500">
                                                     {Number(prod.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })}
@@ -4174,7 +4458,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const m = v.metas || { monto: 0, unidades: 0, cajas: 0, clientes: 0, grupos: {}, subgrupos: {} };
                     const metasObj = { id: v.id, nombre: v.nombre, monto: m.monto || 0, unidades: m.unidades || 0, cajas: m.cajas || 0, clientes: m.clientes || 0, grupos: {}, subgrupos: {} };
                     dynamicGroups.forEach(g => { metasObj.grupos[g] = m.grupos && m.grupos[g] ? m.grupos[g] : { monto: 0, cajas: 0 }; });
-                    dynamicSubgroups.forEach(sg => { metasObj.subgrupos[sg] = m.subgrupos?.[sg] || { monto: 0, cajas: 0 }; });
+                    dynamicSubgroups.forEach(sg => { metasObj.subgrupos[sg] = m.subgrupos?.[sg] || { monto: 0, cajas: 0, clientes: 0 }; });
                     return metasObj;
                 });
                 setMetasMasivas(metasTabla);
@@ -4195,7 +4479,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 // Filtrar estrictamente por fuente currMonth
                 const currentSales = sales.filter(s => s.source === 'currMonth' || (!s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr)));
 
-                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0;
+                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0; let totalKilos = 0;
                 const vendedoresMap = {}; const clientesUnicos = new Set();
                 const productosUnicos = new Set(); const facturasUnicas = new Set();
 
@@ -4208,39 +4492,45 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         monto: 0,
                         unidades: 0,
                         cajas: 0,
+                        kilos: 0,
                         metaMonto: Number(u.metas?.monto) || 0,
                         metaCajas: Number(u.metas?.cajas) || 0,
                         metaUnidades: Number(u.metas?.unidades) || 0,
+                        metaClientes: Number(u.metas?.clientes) || 0,
                         metaGrupos: u.metas?.grupos || {},
                         logradoGrupos: {},
                         metaSubgrupos: u.metas?.subgrupos || {},
                         logradoSubgrupos: {},
-                        hasAnyMeta: (Number(u.metas?.monto) > 0 || Number(u.metas?.cajas) > 0 || Number(u.metas?.unidades) > 0 || (u.metas?.grupos && Object.keys(u.metas?.grupos).length > 0) || (u.metas?.subgrupos && Object.keys(u.metas?.subgrupos).length > 0))
+                        clientesLogrados: new Set(),
+                        hasAnyMeta: (Number(u.metas?.monto) > 0 || Number(u.metas?.cajas) > 0 || Number(u.metas?.unidades) > 0 || Number(u.metas?.clientes) > 0 || (u.metas?.grupos && Object.keys(u.metas?.grupos).length > 0) || (u.metas?.subgrupos && Object.keys(u.metas?.subgrupos).length > 0))
                     };
                 });
 
                 // 2. Sumar las ventas y asignarlas al vendedor correspondiente
                 currentSales.forEach(sale => {
-                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0;
+                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0; totalKilos += sale.kilos || 0;
                     if (sale.monto > 0) { clientesUnicos.add(sale.idCliente); productosUnicos.add(sale.articulo); }
                     if (sale.numero && sale.tipoDoc !== 'DV') facturasUnicas.add(sale.numero);
 
                     const vIdNorm = normalizeId(sale.idVendedor) || 'S/N';
 
-                    const updateLogradoGrupos = (vMap, grupo, saleMonto, saleCajas) => {
+                    const updateLogradoGrupos = (vMap, grupo, saleMonto, saleCajas, saleKilos) => {
                         const g = grupo || 'GENERAL';
                         if (!vMap.logradoGrupos) vMap.logradoGrupos = {};
-                        if (!vMap.logradoGrupos[g]) vMap.logradoGrupos[g] = { monto: 0, cajas: 0 };
+                        if (!vMap.logradoGrupos[g]) vMap.logradoGrupos[g] = { monto: 0, cajas: 0, kilos: 0 };
                         vMap.logradoGrupos[g].monto += saleMonto;
                         vMap.logradoGrupos[g].cajas += saleCajas;
+                        vMap.logradoGrupos[g].kilos += saleKilos;
                     };
 
-                    const updateLogradoSubgrupos = (vMap, subgrupo, saleMonto, saleCajas) => {
+                    const updateLogradoSubgrupos = (vMap, subgrupo, saleMonto, saleCajas, saleKilos, idCliente) => {
                         const sg = subgrupo || 'SIN SUBGRUPO';
                         if (!vMap.logradoSubgrupos) vMap.logradoSubgrupos = {};
-                        if (!vMap.logradoSubgrupos[sg]) vMap.logradoSubgrupos[sg] = { monto: 0, cajas: 0 };
+                        if (!vMap.logradoSubgrupos[sg]) vMap.logradoSubgrupos[sg] = { monto: 0, cajas: 0, kilos: 0, clientesUnicos: new Set() };
                         vMap.logradoSubgrupos[sg].monto += saleMonto;
                         vMap.logradoSubgrupos[sg].cajas += saleCajas;
+                        vMap.logradoSubgrupos[sg].kilos += saleKilos;
+                        if (saleMonto > 0) vMap.logradoSubgrupos[sg].clientesUnicos.add(idCliente);
                     };
 
                     // Si el vendedor existe en nuestra BD de usuarios, sumar ahí
@@ -4248,8 +4538,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         vendedoresMap[vIdNorm].monto += sale.monto;
                         vendedoresMap[vIdNorm].unidades += sale.unidades;
                         vendedoresMap[vIdNorm].cajas += sale.cajas || 0;
-                        updateLogradoGrupos(vendedoresMap[vIdNorm], sale.grupo, sale.monto, sale.cajas || 0);
-                        updateLogradoSubgrupos(vendedoresMap[vIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0);
+                        vendedoresMap[vIdNorm].kilos += sale.kilos || 0;
+                        vendedoresMap[vIdNorm].clientesLogrados.add(sale.idCliente);
+                        updateLogradoGrupos(vendedoresMap[vIdNorm], sale.grupo, sale.monto, sale.cajas || 0, sale.kilos || 0);
+                        updateLogradoSubgrupos(vendedoresMap[vIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0, sale.kilos || 0, sale.idCliente);
                     } else {
                         // Fallback: buscar por coincidencia de nombre parcial si el ID del Excel falló
                         const matchByName = Object.values(vendedoresMap).find(v => sale.vendedor && v.nombre.toUpperCase().includes(normalizeName(sale.vendedor)));
@@ -4259,18 +4551,22 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             vendedoresMap[matchIdNorm].monto += sale.monto;
                             vendedoresMap[matchIdNorm].unidades += sale.unidades;
                             vendedoresMap[matchIdNorm].cajas += sale.cajas || 0;
-                            updateLogradoGrupos(vendedoresMap[matchIdNorm], sale.grupo, sale.monto, sale.cajas || 0);
-                            updateLogradoSubgrupos(vendedoresMap[matchIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0);
+                            vendedoresMap[matchIdNorm].kilos += sale.kilos || 0;
+                            vendedoresMap[matchIdNorm].clientesLogrados.add(sale.idCliente);
+                            updateLogradoGrupos(vendedoresMap[matchIdNorm], sale.grupo, sale.monto, sale.cajas || 0, sale.kilos || 0);
+                            updateLogradoSubgrupos(vendedoresMap[matchIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0, sale.kilos || 0, sale.idCliente);
                         } else {
                             // Si definitivamente no está registrado, lo agregamos como "Vendedor Desconocido"
                             if (!vendedoresMap[vIdNorm]) {
-                                vendedoresMap[vIdNorm] = { id: sale.idVendedor, nombre: sale.vendedor || 'Vendedor Desconocido', monto: 0, unidades: 0, cajas: 0, metaMonto: 0, metaCajas: 0, metaUnidades: 0, metaGrupos: {}, logradoGrupos: {}, metaSubgrupos: {}, logradoSubgrupos: {}, hasAnyMeta: false };
+                                vendedoresMap[vIdNorm] = { id: sale.idVendedor, nombre: sale.vendedor || 'Vendedor Desconocido', monto: 0, unidades: 0, cajas: 0, kilos: 0, metaMonto: 0, metaCajas: 0, metaUnidades: 0, metaClientes: 0, metaGrupos: {}, logradoGrupos: {}, metaSubgrupos: {}, logradoSubgrupos: {}, clientesLogrados: new Set(), hasAnyMeta: false };
                             }
                             vendedoresMap[vIdNorm].monto += sale.monto;
                             vendedoresMap[vIdNorm].unidades += sale.unidades;
                             vendedoresMap[vIdNorm].cajas += sale.cajas || 0;
-                            updateLogradoGrupos(vendedoresMap[vIdNorm], sale.grupo, sale.monto, sale.cajas || 0);
-                            updateLogradoSubgrupos(vendedoresMap[vIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0);
+                            vendedoresMap[vIdNorm].kilos += sale.kilos || 0;
+                            vendedoresMap[vIdNorm].clientesLogrados.add(sale.idCliente);
+                            updateLogradoGrupos(vendedoresMap[vIdNorm], sale.grupo, sale.monto, sale.cajas || 0, sale.kilos || 0);
+                            updateLogradoSubgrupos(vendedoresMap[vIdNorm], sale.subgrupo, sale.monto, sale.cajas || 0, sale.kilos || 0, sale.idCliente);
                         }
                     }
                 });
@@ -4284,7 +4580,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 const precioPromedio = totalUnidades > 0 ? totalMonto / totalUnidades : 0;
                 const ticketPromedio = totalPedidos > 0 ? totalMonto / totalPedidos : 0;
 
-                return { totalMonto, totalUnidades, totalCajas, totalPedidos, activeClientsCount, ranking, productos: productosUnicos.size, precioPromedio, ticketPromedio };
+                return { totalMonto, totalUnidades, totalCajas, totalKilos, totalPedidos, activeClientsCount, ranking, productos: productosUnicos.size, precioPromedio, ticketPromedio };
             }, [sales, users, currentMonthStr]);
 
             const filteredCarteraAdmin = useMemo(() => {
@@ -4342,10 +4638,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             const handleDownloadPlantillaMetas = () => {
                 let headerHtml = `<th>ID_Vendedor</th><th>Nombre_Vendedor</th><th>Meta_Global_Monto</th><th>Meta_Global_Cajas</th><th>Meta_Global_Unidades</th><th>Meta_Global_Clientes</th>`;
                 dynamicGroups.forEach(g => { headerHtml += `<th>Meta_${g}_Monto</th><th>Meta_${g}_Cajas</th>`; });
-                dynamicSubgroups.forEach(sg => { headerHtml += `<th>MetaSub_${sg}_Monto</th><th>MetaSub_${sg}_Cajas</th>`; });
+                dynamicSubgroups.forEach(sg => { headerHtml += `<th>MetaSub_${sg}_Monto</th><th>MetaSub_${sg}_Cajas</th><th>MetaSub_${sg}_Clientes</th>`; });
                 let sampleRowHtml = `<td>052</td><td>EJEMPLO VENDEDOR</td><td>3000</td><td>50</td><td>500</td><td>5</td>`;
                 dynamicGroups.forEach(g => { sampleRowHtml += `<td>1500</td><td>25</td>`; });
-                dynamicSubgroups.forEach(sg => { sampleRowHtml += `<td>500</td><td>10</td>`; });
+                dynamicSubgroups.forEach(sg => { sampleRowHtml += `<td>500</td><td>10</td><td>5</td>`; });
                 const tableHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${headerHtml}</tr></thead><tbody><tr>${sampleRowHtml}</tr></tbody></table></body></html>`;
                 const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel' });
                 const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "plantilla_carga_metas.xls";
@@ -4401,7 +4697,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 dynamicSubgroups.forEach(sg => {
                                     const monto = parseFloat(cleanRow[`MetaSub_${sg}_Monto`]) || 0;
                                     const cajas = parseFloat(cleanRow[`MetaSub_${sg}_Cajas`]) || 0;
-                                    if (monto > 0 || cajas > 0) subgruposObj[sg] = { monto, cajas };
+                                    const clientes = parseFloat(cleanRow[`MetaSub_${sg}_Clientes`]) || 0;
+                                    if (monto > 0 || cajas > 0 || clientes > 0) subgruposObj[sg] = { monto, cajas, clientes };
                                 });
                                 Object.assign(metasObj.subgrupos, subgruposObj);
                                 if (rowIndex !== -1) nuevasMetasLocales[rowIndex] = metasObj; else nuevasMetasLocales.push(metasObj);
@@ -4464,7 +4761,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 const sg = newSubgroupName.trim().toUpperCase();
                 if (sg && !dynamicSubgroups.includes(sg)) {
                     setDynamicSubgroups([...dynamicSubgroups, sg]);
-                    const novasMetas = metasMasivas.map(v => ({ ...v, subgrupos: { ...(v.subgrupos || {}), [sg]: { monto: 0, cajas: 0 } } }));
+                    const novasMetas = metasMasivas.map(v => ({ ...v, subgrupos: { ...(v.subgrupos || {}), [sg]: { monto: 0, cajas: 0, clientes: 0 } } }));
                     setMetasMasivas(novasMetas); setNewSubgroupName("");
                 }
             };
@@ -4475,8 +4772,9 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (!vendedorSeleccionado) return;
                 if (metasMasivas.find(m => m.id === vendedorSeleccionado.id)) { setSelectedNewVendedorForMeta(""); return; }
 
-                const novoVendedor = { id: vendedorSeleccionado.id, nombre: vendedorSeleccionado.nombre, monto: 0, unidades: 0, cajas: 0, clientes: 0, grupos: {} };
+                const novoVendedor = { id: vendedorSeleccionado.id, nombre: vendedorSeleccionado.nombre, monto: 0, unidades: 0, cajas: 0, clientes: 0, grupos: {}, subgrupos: {} };
                 dynamicGroups.forEach(g => { novoVendedor.grupos[g] = { monto: 0, cajas: 0 }; });
+                dynamicSubgroups.forEach(sg => { novoVendedor.subgrupos[sg] = { monto: 0, cajas: 0, clientes: 0 }; });
 
                 setMetasMasivas([...metasMasivas, novoVendedor]); setSelectedNewVendedorForMeta("");
             };
@@ -4498,7 +4796,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             const handleMetaSubgrupoChange = (index, grupo, tipo, value) => {
                 const newMetas = [...metasMasivas];
                 if (!newMetas[index].subgrupos) newMetas[index].subgrupos = {};
-                if (!newMetas[index].subgrupos[grupo]) newMetas[index].subgrupos[grupo] = { monto: 0, cajas: 0 };
+                if (!newMetas[index].subgrupos[grupo]) newMetas[index].subgrupos[grupo] = { monto: 0, cajas: 0, clientes: 0 };
                 newMetas[index].subgrupos[grupo][tipo] = parseNum(value);
                 setMetasMasivas(newMetas);
             };
@@ -4513,7 +4811,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         if (existingUser) {
                             const metaPayload = {
                                 monto: Number(metaRow.monto) || 0, unidades: Number(metaRow.unidades) || 0, cajas: Number(metaRow.cajas) || 0,
-                                clientes: Number(metaRow.clientes) || 0, grupos: metaRow.grupos || {}
+                                clientes: Number(metaRow.clientes) || 0, grupos: metaRow.grupos || {}, subgrupos: metaRow.subgrupos || {}
                             };
                             await updateDoc(doc(db, getCollectionPath('users'), existingUser.id), { metas: metaPayload });
                             updatedCount++;
@@ -4641,6 +4939,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                     <h3 className="text-xl font-black text-blue-900 mb-6 flex items-center gap-3 border-b border-slate-100 pb-4"><Target className="text-orange-500" /> Progreso de la Empresa</h3>
                                     <ProgressBar current={globalStats.totalMonto} target={globalMetaMonto} label="Total Ingresos vs Meta ($)" colorClass="bg-blue-600" />
                                     <ProgressBar current={globalStats.totalCajas} target={globalMetaCajas} label="Total Cajas vs Meta" colorClass="bg-yellow-500" />
+                                    <ProgressBar current={globalStats.totalUnidades} target={globalMetaUnidades} label="Total Unidades vs Meta" colorClass="bg-orange-500" />
+                                    <ProgressBar current={globalStats.activeClientsCount} target={globalMetaClientes} label="Total Activación vs Meta" colorClass="bg-green-500" />
                                 </div>
 
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -4662,7 +4962,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                     </div>
                                                     <div className="text-right flex flex-col items-end shrink-0 pl-2">
                                                         <span className="font-bold text-blue-900">${vendedor.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded mt-0.5">{Number(vendedor.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(vendedor.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un</span>
+                                                        <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded mt-0.5">{Number(vendedor.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(vendedor.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un | {Number(vendedor.kilos || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg</span>
                                                     </div>
                                                 </div>
                                                 {expandedVendedorMeta === vendedor.id && vendedor.hasAnyMeta && (
@@ -4725,7 +5025,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                     </thead>
                                                                     <tbody className="divide-y divide-slate-100">
                                                                         {Object.entries(vendedor.metaGrupos).map(([grupo, meta]) => {
-                                                                            const logrado = vendedor.logradoGrupos?.[grupo] || { monto: 0, cajas: 0 };
+                                                                            const logrado = vendedor.logradoGrupos?.[grupo] || { monto: 0, cajas: 0, kilos: 0 };
                                                                             return (
                                                                                 <React.Fragment key={grupo}>
                                                                                     {meta.monto > 0 && (
@@ -4770,7 +5070,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                     </thead>
                                                                     <tbody className="divide-y divide-slate-100">
                                                                         {Object.entries(vendedor.metaSubgrupos).map(([subgrupo, meta]) => {
-                                                                            const logrado = vendedor.logradoSubgrupos?.[subgrupo] || { monto: 0, cajas: 0 };
+                                                                            const logrado = vendedor.logradoSubgrupos?.[subgrupo] || { monto: 0, cajas: 0, clientesUnicos: new Set() };
                                                                             return (
                                                                                 <React.Fragment key={subgrupo}>
                                                                                     {meta.monto > 0 && (
@@ -4794,6 +5094,18 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                                             <td className="py-1.5 text-right font-black text-yellow-600">{logrado.cajas.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                                                                                             <td className={`py-1.5 text-right ${(logrado.cajas / meta.cajas * 100) >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`}>
                                                                                                 {((logrado.cajas / meta.cajas) * 100).toFixed(1)}%
+                                                                                            </td>
+                                                                                        </tr>
+                                                                                    )}
+                                                                                    {meta.clientes > 0 && (
+                                                                                        <tr>
+                                                                                            <td className="py-1.5 font-bold text-slate-700 flex items-center gap-1.5">
+                                                                                                <span className="text-[9px] font-black text-white bg-blue-500 px-1.5 py-0.5 rounded">{subgrupo}</span> Activación (Cl)
+                                                                                            </td>
+                                                                                            <td className="py-1.5 text-right font-medium text-slate-500">{meta.clientes.toLocaleString()}</td>
+                                                                                            <td className="py-1.5 text-right font-black text-green-600">{logrado.clientesUnicos?.size || 0}</td>
+                                                                                            <td className={`py-1.5 text-right ${((logrado.clientesUnicos?.size || 0) / meta.clientes * 100) >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`}>
+                                                                                                {(((logrado.clientesUnicos?.size || 0) / meta.clientes) * 100).toFixed(1)}%
                                                                                             </td>
                                                                                         </tr>
                                                                                     )}
@@ -5002,7 +5314,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                         <button onClick={() => openModal('deleteSubgroup', grupo, 'Eliminar Subgrupo de Metas', `¿Estás seguro de eliminar el subgrupo "${grupo}" de la tabla? Esto borrará las metas asignadas a este subgrupo para todos los vendedores.`)} className="text-purple-300 hover:text-red-500 transition-colors" title={`Eliminar subgrupo ${grupo}`}><X size={14} /></button>
                                                     </div>
                                                     <div className="flex gap-2 text-[10px] mt-2 font-bold text-purple-600 border-t border-purple-200 pt-1">
-                                                        <span className="flex-1 text-center">MONTO ($)</span> <span className="flex-1 text-center">CAJAS (Cj)</span>
+                                                        <span className="flex-1 text-center">MONTO ($)</span> <span className="flex-1 text-center">CAJAS (Cj)</span> <span className="flex-1 text-center">ACTIV (Cl)</span>
                                                     </div>
                                                 </th>
                                             ))}
@@ -5043,11 +5355,13 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                 {dynamicSubgroups.map(grupo => {
                                                     const grupoMonto = vendedor.subgrupos?.[grupo]?.monto;
                                                     const grupoCajas = vendedor.subgrupos?.[grupo]?.cajas;
+                                                    const grupoClientes = vendedor.subgrupos?.[grupo]?.clientes;
                                                     return (
-                                                        <td key={`sg-${grupo}`} className="px-3 py-3 border-r border-slate-100 min-w-[180px] bg-purple-50/30">
+                                                        <td key={`sg-${grupo}`} className="px-3 py-3 border-r border-slate-100 min-w-[250px] bg-purple-50/30">
                                                             <div className="flex gap-2">
                                                                 <input type="text" value={grupoMonto === 0 || grupoMonto === undefined ? "" : grupoMonto} onChange={(e) => handleMetaSubgrupoChange(index, grupo, 'monto', e.target.value)} placeholder="$ 0" className="w-full border-2 border-purple-100 hover:border-purple-300 focus:border-purple-500 rounded-lg p-2 outline-none bg-white text-right transition-all font-bold text-slate-700" title={`Meta en Dólares para ${grupo}`} />
                                                                 <input type="text" value={grupoCajas === 0 || grupoCajas === undefined ? "" : grupoCajas} onChange={(e) => handleMetaSubgrupoChange(index, grupo, 'cajas', e.target.value)} placeholder="Cj 0" className="w-full border-2 border-purple-100 hover:border-purple-300 focus:border-purple-500 rounded-lg p-2 outline-none bg-white text-right transition-all font-bold text-slate-700" title={`Meta en Cajas para ${grupo}`} />
+                                                                <input type="text" value={grupoClientes === 0 || grupoClientes === undefined ? "" : grupoClientes} onChange={(e) => handleMetaSubgrupoChange(index, grupo, 'clientes', e.target.value)} placeholder="Cl 0" className="w-full border-2 border-purple-100 hover:border-purple-300 focus:border-purple-500 rounded-lg p-2 outline-none bg-white text-right transition-all font-bold text-slate-700" title={`Meta de Activación (Clientes) para ${grupo}`} />
                                                             </div>
                                                         </td>
                                                     );
@@ -5547,7 +5861,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     (myTeamIds.includes(normalizeId(s.idVendedor)))
                 );
 
-                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0;
+                let totalMonto = 0; let totalUnidades = 0; let totalCajas = 0; let totalKilos = 0;
                 const vendedoresMap = {}; const clientesUnicos = new Set();
                 const productosUnicos = new Set(); const facturasUnicas = new Set();
 
@@ -5559,20 +5873,28 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         monto: 0,
                         unidades: 0,
                         cajas: 0,
+                        kilos: 0,
                         metaMonto: Number(u.metas?.monto) || 0,
                         metaCajas: Number(u.metas?.cajas) || 0,
                         metaUnidades: Number(u.metas?.unidades) || 0,
+                        metaClientes: Number(u.metas?.clientes) || 0,
                         metaGrupos: u.metas?.grupos || {},
                         logradoGrupos: {},
                         metaSubgrupos: u.metas?.subgrupos || {},
                         logradoSubgrupos: {},
-                        hasAnyMeta: (Number(u.metas?.monto) > 0 || Number(u.metas?.cajas) > 0 || Number(u.metas?.unidades) > 0 || (u.metas?.grupos && Object.keys(u.metas?.grupos).length > 0) || (u.metas?.subgrupos && Object.keys(u.metas?.subgrupos).length > 0))
+                        clientesLogrados: new Set(),
+                        hasAnyMeta: (Number(u.metas?.monto) > 0 || Number(u.metas?.cajas) > 0 || Number(u.metas?.unidades) > 0 || Number(u.metas?.clientes) > 0 || (u.metas?.grupos && Object.keys(u.metas?.grupos).length > 0) || (u.metas?.subgrupos && Object.keys(u.metas?.subgrupos).length > 0))
                     };
                 });
 
                 currentSales.forEach(sale => {
-                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0;
-                    if (sale.monto > 0) { clientesUnicos.add(sale.idCliente); productosUnicos.add(sale.articulo); }
+                    totalMonto += sale.monto; totalUnidades += sale.unidades; totalCajas += sale.cajas || 0; totalKilos += sale.kilos || 0;
+                    if (sale.monto > 0) { 
+                        clientesUnicos.add(sale.idCliente); 
+                        productosUnicos.add(sale.articulo); 
+                        const vIdNorm = normalizeId(sale.idVendedor);
+                        if (vendedoresMap[vIdNorm]) vendedoresMap[vIdNorm].clientesLogrados.add(sale.idCliente);
+                    }
                     if (sale.numero && sale.tipoDoc !== 'DV') facturasUnicas.add(sale.numero);
 
                     const vIdNorm = normalizeId(sale.idVendedor);
@@ -5580,20 +5902,24 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         vendedoresMap[vIdNorm].monto += sale.monto;
                         vendedoresMap[vIdNorm].unidades += sale.unidades;
                         vendedoresMap[vIdNorm].cajas += sale.cajas || 0;
+                        vendedoresMap[vIdNorm].kilos += sale.kilos || 0;
                         
                         const grupo = sale.grupo || 'GENERAL';
                         if (!vendedoresMap[vIdNorm].logradoGrupos[grupo]) {
-                            vendedoresMap[vIdNorm].logradoGrupos[grupo] = { monto: 0, cajas: 0 };
+                            vendedoresMap[vIdNorm].logradoGrupos[grupo] = { monto: 0, cajas: 0, kilos: 0 };
                         }
                         vendedoresMap[vIdNorm].logradoGrupos[grupo].monto += sale.monto;
                         vendedoresMap[vIdNorm].logradoGrupos[grupo].cajas += (sale.cajas || 0);
+                        vendedoresMap[vIdNorm].logradoGrupos[grupo].kilos += (sale.kilos || 0);
 
                         const subgrupo = sale.subgrupo || 'SIN SUBGRUPO';
                         if (!vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo]) {
-                            vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo] = { monto: 0, cajas: 0 };
+                            vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo] = { monto: 0, cajas: 0, kilos: 0, clientesUnicos: new Set() };
                         }
                         vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo].monto += sale.monto;
                         vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo].cajas += (sale.cajas || 0);
+                        vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo].kilos += (sale.kilos || 0);
+                        if (sale.monto > 0) vendedoresMap[vIdNorm].logradoSubgrupos[subgrupo].clientesUnicos.add(sale.idCliente);
                     }
                 });
 
@@ -5603,7 +5929,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 const precioPromedio = totalUnidades > 0 ? totalMonto / totalUnidades : 0;
                 const ticketPromedio = totalPedidos > 0 ? totalMonto / totalPedidos : 0;
 
-                return { totalMonto, totalUnidades, totalCajas, totalPedidos, activeClientsCount, ranking, productos: productosUnicos.size, precioPromedio, ticketPromedio };
+                return { totalMonto, totalUnidades, totalCajas, totalKilos, totalPedidos, activeClientsCount, ranking, productos: productosUnicos.size, precioPromedio, ticketPromedio };
             }, [sales, myTeam, myTeamIds, currentMonthStr]);
 
             const teamMetaMonto = myTeam.reduce((acc, curr) => acc + (Number(curr.metas?.monto) || 0), 0);
@@ -5650,12 +5976,13 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             <TopKPIsBar stats={teamStats} meta={metaGlobal} />
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                            <h3 className="text-xl font-black text-purple-900 mb-6 flex items-center gap-3 border-b border-slate-100 pb-4"><Target className="text-orange-500" /> Progreso de Mi Equipo</h3>
-                            <ProgressBar current={teamStats.totalMonto} target={teamMetaMonto} label="Ingresos del Equipo vs Meta ($)" colorClass="bg-purple-600" />
-                            <ProgressBar current={teamStats.totalCajas} target={teamMetaCajas} label="Cajas del Equipo vs Meta" colorClass="bg-yellow-500" />
-                            <ProgressBar current={teamStats.totalUnidades} target={teamMetaUnidades} label="Unidades del Equipo vs Meta" colorClass="bg-orange-500" />
-                        </div>
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                    <h3 className="text-xl font-black text-purple-900 mb-6 flex items-center gap-3 border-b border-slate-100 pb-4"><Target className="text-orange-500" /> Progreso de Mi Equipo</h3>
+                                    <ProgressBar current={teamStats.totalMonto} target={teamMetaMonto} label="Ingresos del Equipo vs Meta ($)" colorClass="bg-purple-600" />
+                                    <ProgressBar current={teamStats.totalCajas} target={teamMetaCajas} label="Cajas del Equipo vs Meta" colorClass="bg-yellow-500" />
+                                    <ProgressBar current={teamStats.totalUnidades} target={teamMetaUnidades} label="Unidades del Equipo vs Meta" colorClass="bg-orange-500" />
+                                    <ProgressBar current={teamStats.activeClientsCount} target={teamMetaClientes} label="Activación de Clientes del Equipo" colorClass="bg-green-500" />
+                                </div>
 
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                             <h3 className="text-xl font-black text-purple-900 mb-6 flex items-center gap-3 border-b border-slate-100 pb-4"><Users className="text-orange-500" /> Ranking de Mi Equipo</h3>
@@ -5676,7 +6003,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                             </div>
                                             <div className="text-right flex flex-col items-end shrink-0 pl-2">
                                                 <span className="font-bold text-purple-900">${vendedor.monto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded mt-0.5">{Number(vendedor.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(vendedor.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un</span>
+                                                <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded mt-0.5">{Number(vendedor.cajas).toLocaleString(undefined, { maximumFractionDigits: 2 })} cj | {Number(vendedor.unidades).toLocaleString(undefined, { maximumFractionDigits: 2 })} un | {Number(vendedor.kilos || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg</span>
                                             </div>
                                         </div>
                                         {expandedVendedorMeta === vendedor.id && vendedor.hasAnyMeta && (
@@ -5722,6 +6049,16 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                 </td>
                                                             </tr>
                                                         )}
+                                                        {vendedor.metaClientes > 0 && (
+                                                            <tr>
+                                                                <td className="py-1.5 font-bold text-slate-700">Activación (Cl)</td>
+                                                                <td className="py-1.5 text-right font-medium text-slate-500">{vendedor.metaClientes.toLocaleString()}</td>
+                                                                <td className="py-1.5 text-right font-black text-green-700">{vendedor.clientesLogrados?.size || 0}</td>
+                                                                <td className={`py-1.5 text-right ${((vendedor.clientesLogrados?.size || 0) / vendedor.metaClientes * 100) >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`}>
+                                                                    {(((vendedor.clientesLogrados?.size || 0) / vendedor.metaClientes) * 100).toFixed(1)}%
+                                                                </td>
+                                                            </tr>
+                                                        )}
                                                     </tbody>
                                                 </table>
 
@@ -5739,7 +6076,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                             </thead>
                                                             <tbody className="divide-y divide-slate-100">
                                                                 {Object.entries(vendedor.metaGrupos).map(([grupo, meta]) => {
-                                                                    const logrado = vendedor.logradoGrupos?.[grupo] || { monto: 0, cajas: 0 };
+                                                                    const logrado = vendedor.logradoGrupos?.[grupo] || { monto: 0, cajas: 0, kilos: 0 };
                                                                     return (
                                                                         <React.Fragment key={grupo}>
                                                                             {meta.monto > 0 && (
@@ -5808,6 +6145,18 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                                     <td className="py-1.5 text-right font-black text-yellow-600">{logrado.cajas.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                                                                                     <td className={`py-1.5 text-right ${(logrado.cajas / meta.cajas * 100) >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`}>
                                                                                         {((logrado.cajas / meta.cajas) * 100).toFixed(1)}%
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                            {meta.clientes > 0 && (
+                                                                                <tr>
+                                                                                    <td className="py-1.5 font-bold text-slate-700 flex items-center gap-1.5">
+                                                                                        <span className="text-[9px] font-black text-white bg-blue-500 px-1.5 py-0.5 rounded">{subgrupo}</span> Activación (Cl)
+                                                                                    </td>
+                                                                                    <td className="py-1.5 text-right font-medium text-slate-500">{meta.clientes.toLocaleString()}</td>
+                                                                                    <td className="py-1.5 text-right font-black text-green-600">{logrado.clientesUnicos?.size || 0}</td>
+                                                                                    <td className={`py-1.5 text-right ${((logrado.clientesUnicos?.size || 0) / meta.clientes * 100) >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`}>
+                                                                                        {(((logrado.clientesUnicos?.size || 0) / meta.clientes) * 100).toFixed(1)}%
                                                                                     </td>
                                                                                 </tr>
                                                                             )}
@@ -6288,7 +6637,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 articulo: articuloVal,
                 cajas: parseNum(getVal(['Cajas', 'Cj', 'Bultos', 'Caixes'])),
                 unidades: parseNum(getVal(['Unidades', 'Und', 'Piezas', 'Unitats'])),
-                monto: parseNum(getVal(['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import']))
+                monto: parseNum(getVal(['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import'])),
+                kilos: parseNum(getVal(['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']))
             };
         }
 
