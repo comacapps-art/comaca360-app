@@ -121,7 +121,6 @@
     <script type="text/babel" data-type="module" data-presets="react">
         import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferredValue } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { flushSync } from 'react-dom';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField } from 'firebase/firestore';
@@ -365,12 +364,18 @@
             const [filterToday, setFilterToday] = useState(false);
             const [stats, setStats] = useState({ totalVisibles: 0 });
 
+            const mySupervisorsIds = useMemo(() => {
+                return users
+                    .filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(currentUser.id))
+                    .map(u => normalizeId(u.id));
+            }, [users, currentUser]);
+
             const vendedoresConGps = useMemo(() => {
                 const mapIds = new Map();
                 pedidos.forEach(p => {
                     if (p.ubicacion && p.ubicacion.lat && p.ubicacion.lng) {
                         const seller = users.find(u => u.id === p.vendedorId);
-                        const isMyTeam = currentUser.rol === 'admin' || (seller && seller.supervisor === currentUser.id);
+                        const isMyTeam = currentUser.rol === 'admin' || (seller && (normalizeId(seller.supervisor) === normalizeId(currentUser.id) || mySupervisorsIds.includes(normalizeId(seller.supervisor))));
 
                         if (isMyTeam && !mapIds.has(p.vendedorId)) {
                             mapIds.set(p.vendedorId, p.vendedorNombre);
@@ -378,7 +383,7 @@
                     }
                 });
                 return Array.from(mapIds.entries()).map(([id, nombre]) => ({ id, nombre }));
-            }, [pedidos, users, currentUser]);
+            }, [pedidos, users, currentUser, mySupervisorsIds]);
 
             const validPedidos = useMemo(() => {
                 const todayStr = new Date().toISOString().split('T')[0];
@@ -386,7 +391,11 @@
                     if (!p.ubicacion || !p.ubicacion.lat || !p.ubicacion.lng) return false;
 
                     const seller = users.find(u => u.id === p.vendedorId);
-                    if (currentUser.rol === 'gerente' && (!seller || seller.supervisor !== currentUser.id)) return false;
+                    if (currentUser.rol === 'gerente') {
+                        if (!seller) return false;
+                        const hasDirectOrIndirect = normalizeId(seller.supervisor) === normalizeId(currentUser.id) || mySupervisorsIds.includes(normalizeId(seller.supervisor));
+                        if (!hasDirectOrIndirect) return false;
+                    }
 
                     if (selectedVendedor !== 'ALL' && p.vendedorId !== selectedVendedor) return false;
 
@@ -440,7 +449,7 @@
                     const marker = window.L.marker([p.ubicacion.lat, p.ubicacion.lng]);
                     const popupContent = `
                         <div class="p-1">
-                            <strong class="text-blue-900 block mb-1 text-sm">${p.clienteNombre}</strong>
+                            <strong class="text-blue-900 block mb-1 text-sm">[${p.clienteId || 'S/N'}] ${p.clienteNombre}</strong>
                             <span class="text-xs text-slate-500 block">Vendedor: ${p.vendedorNombre}</span>
                             <span class="text-xs text-slate-500 block">Fecha: ${safeFormatDate(p.fecha)}</span>
                             <span class="text-xs text-slate-500 block">Total: $${p.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -553,7 +562,8 @@
                 const newArticulos = pedido.articulos.map(item => {
                     const priceItem = precios.find(p => p.sku === item.sku && p.lista === newLista);
                     const newPrice = priceItem ? priceItem.precio : 0;
-                    return { ...item, precio: newPrice, subtotal: newPrice * item.cantidad };
+                    const discount = item.descuento || 0;
+                    return { ...item, precio: newPrice, subtotal: newPrice * item.cantidad * (1 - discount / 100) };
                 });
 
                 setArticulos(newArticulos);
@@ -598,14 +608,23 @@
                     jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
                 };
 
-                window.html2pdf().set(opt).from(element).save().then(() => {
+                window.html2pdf().set(opt).from(element).save().then(async () => {
                     setIsPrinting(false);
+                    // Auto-aprobar al imprimir si no estaba ya aprobado
+                    if (pedido.estado !== 'Aprobado') {
+                        try {
+                            await updateDoc(doc(db, getCollectionPath('pedidos'), pedido.id), { estado: 'Aprobado' });
+                        } catch (e) {
+                            console.error('Error al auto-aprobar pedido al imprimir:', e);
+                        }
+                    }
                 }).catch(err => {
                     console.error(err);
                     setIsPrinting(false);
                     openModal('alert', null, 'Error', 'No se pudo generar el PDF.', true);
                 });
             };
+
 
             return (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print-modal">
@@ -661,8 +680,8 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-xl border border-slate-100">
                                     <div>
                                         <p className="text-xs text-slate-400 font-bold uppercase mb-1">Datos del Cliente</p>
-                                        <p className="font-black text-slate-800 text-lg leading-tight">{pedido.clienteNombre || 'Sin Nombre'}</p>
-                                        <p className="text-sm text-slate-500 mt-1 font-mono">ID: {pedido.clienteId || 'N/A'}</p>
+                                        <p className="font-black text-slate-800 text-lg leading-tight">[{pedido.clienteId || 'S/N'}] {pedido.clienteNombre || 'Sin Nombre'}</p>
+                                        <p className="text-sm text-slate-500 mt-1 font-mono italic">Documento de Pedido</p>
                                     </div>
                                     <div>
                                         <p className="text-xs text-slate-400 font-bold uppercase mb-1">Datos del Vendedor</p>
@@ -727,6 +746,7 @@
                                         <th className="py-3 px-2">Descripción</th>
                                         <th className="py-3 px-2 text-center">Cant</th>
                                         <th className="py-3 px-2 text-right">Precio Unit.</th>
+                                        <th className="py-3 px-2 text-center">Desc %</th>
                                         <th className="py-3 px-2 text-right">Subtotal</th>
                                     </tr>
                                 </thead>
@@ -738,6 +758,9 @@
                                             <td className="py-3 px-2 text-center font-black text-slate-600">{item.cantidad || 0}</td>
                                             <td className="py-3 px-2 text-right font-medium text-slate-600">
                                                 {item.precio > 0 ? `$${Number(item.precio || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : <span className="text-red-500 font-bold">N/D</span>}
+                                            </td>
+                                            <td className="py-3 px-2 text-center font-bold text-orange-600">
+                                                {item.descuento > 0 ? `${item.descuento}%` : '-'}
                                             </td>
                                             <td className="py-3 px-2 text-right font-black text-slate-800">
                                                 ${Number(item.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -889,9 +912,14 @@
                     if (existing) {
                         const newQty = existing.cantidad + change;
                         if (newQty <= 0) return prev.filter(item => item.sku !== product.sku);
-                        return prev.map(item => item.sku === product.sku ? { ...item, cantidad: newQty, subtotal: newQty * item.precio } : item);
+                        const desc = existing.descuento || 0;
+                        return prev.map(item => item.sku === product.sku ? { 
+                            ...item, 
+                            cantidad: newQty, 
+                            subtotal: newQty * item.precio * (1 - desc / 100) 
+                        } : item);
                     } else if (change > 0) {
-                        return [...prev, { ...product, cantidad: 1, subtotal: product.precio }];
+                        return [...prev, { ...product, cantidad: 1, descuento: 0, subtotal: product.precio }];
                     }
                     return prev;
                 });
@@ -905,10 +933,34 @@
                 } else {
                     setCart(prev => {
                         const existing = prev.find(item => item.sku === product.sku);
-                        if (existing) return prev.map(item => item.sku === product.sku ? { ...item, cantidad: qty, subtotal: qty * item.precio } : item);
-                        return [...prev, { ...product, cantidad: qty, subtotal: qty * product.precio }];
+                        if (existing) {
+                            const desc = existing.descuento || 0;
+                            return prev.map(item => item.sku === product.sku ? { 
+                                ...item, 
+                                cantidad: qty, 
+                                subtotal: qty * item.precio * (1 - desc / 100) 
+                            } : item);
+                        }
+                        return [...prev, { ...product, cantidad: qty, descuento: 0, subtotal: qty * product.precio }];
                     });
                 }
+            };
+
+            const handleSetDiscount = (sku, val) => {
+                let desc = parseFloat(val);
+                if (isNaN(desc)) desc = 0;
+                desc = Math.max(0, Math.min(100, desc));
+
+                setCart(prev => prev.map(item => {
+                    if (item.sku === sku) {
+                        return { 
+                            ...item, 
+                            descuento: desc, 
+                            subtotal: item.cantidad * item.precio * (1 - desc / 100) 
+                        };
+                    }
+                    return item;
+                }));
             };
 
             const cartTotal = cart.reduce((acc, item) => acc + (item.subtotal || 0), 0);
@@ -945,7 +997,7 @@
                     const pedido = {
                         vendedorId: currentUser.id,
                         vendedorNombre: currentUser.nombre,
-                        clienteId: client.idCliente || client.firebaseId || "S/N",
+                        clienteId: client.idCliente || "S/N",
                         clienteNombre: client.cliente,
                         listaPrecio: 'Múltiple',
                         fecha: new Date().toISOString(),
@@ -988,7 +1040,7 @@
                             <button onClick={goBack} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full transition-colors"><X size={20} /></button>
                             <div>
                                 <h2 className="text-xl font-black text-blue-900 leading-tight">Tomar Pedido</h2>
-                                <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><MapPin size={12} /> {client.cliente}</p>
+                                <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><MapPin size={12} /> <span className="text-blue-600">[{client.idCliente || 'S/N'}]</span> {client.cliente}</p>
                                 <div className="flex items-center gap-2 mt-1">
                                     <span className="text-[10px] font-bold text-slate-400 uppercase">Listas por producto</span>
                                 </div>
@@ -1161,12 +1213,28 @@
                                                     <p className="text-xs font-bold text-slate-800 leading-tight pr-4">{item.nombre}</p>
                                                     <p className="text-[10px] text-slate-400 mt-1">${Number(item.precio || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} c/u</p>
                                                 </div>
-                                                <div className="text-right flex flex-col items-end justify-between">
-                                                    <span className="font-black text-blue-900">${Number(item.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                                    <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-2 py-1 mt-1">
-                                                        <button onClick={() => updateCart(item, -1)} className="text-slate-500 hover:text-blue-600"><Minus size={12} /></button>
-                                                        <span className="text-xs font-bold w-6 text-center">{item.cantidad}</span>
-                                                        <button onClick={() => updateCart(item, 1)} className="text-slate-500 hover:text-blue-600"><Plus size={12} /></button>
+                                                <div className="text-right flex flex-col items-end justify-between min-w-[120px]">
+                                                    <span className="font-black text-blue-900 leading-tight">
+                                                        ${Number(item.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                    
+                                                    <div className="flex flex-col items-end gap-1.5 mt-2">
+                                                        <div className="flex items-center gap-1 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1">
+                                                            <span className="text-[10px] font-black text-orange-600 uppercase tracking-tighter">Desc:</span>
+                                                            <input 
+                                                                type="number" 
+                                                                value={item.descuento || 0} 
+                                                                onChange={(e) => handleSetDiscount(item.sku, e.target.value)}
+                                                                className="w-8 text-center font-black text-xs bg-transparent border-none outline-none text-orange-700 p-0"
+                                                            />
+                                                            <span className="text-[10px] font-black text-orange-600">%</span>
+                                                        </div>
+                                                        
+                                                        <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-2 py-1">
+                                                            <button onClick={() => updateCart(item, -1)} className="text-slate-500 hover:text-blue-600"><Minus size={12} /></button>
+                                                            <span className="text-xs font-bold w-6 text-center">{item.cantidad}</span>
+                                                            <button onClick={() => updateCart(item, 1)} className="text-slate-500 hover:text-blue-600"><Plus size={12} /></button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1288,7 +1356,11 @@
                         (d.idCliente && c.cliente.includes(d.idCliente)) ||
                         (d.rawCliente && d.rawCliente.includes(c.cliente))
                     );
-                    return { ...c, deuda: cxcMatch ? cxcMatch.deuda : 0 };
+                    return { 
+                        ...c, 
+                        idCliente: c.idCliente || (cxcMatch ? cxcMatch.idCliente : 'S/N'),
+                        deuda: cxcMatch ? cxcMatch.deuda : 0 
+                    };
                 });
             }, [cartera, currentUser, searchCliente, cxc]);
 
@@ -1366,7 +1438,9 @@
                                             </div>}
                                             <div className="flex items-start gap-3 mb-4 pr-6">
                                                 <div className="p-3 bg-blue-50 text-blue-600 rounded-xl shrink-0"><Users size={20} /></div>
-                                                <p className="font-black text-slate-800 text-sm leading-tight flex-1">{c.cliente}</p>
+                                                <p className="font-black text-slate-800 text-sm leading-tight flex-1">
+                                                    <span className="text-blue-600">[{c.idCliente || 'S/N'}]</span> {c.cliente}
+                                                </p>
                                             </div>
                                             {c.deuda > 0 && (
                                                 <div className="mb-4 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-600">
@@ -1449,7 +1523,7 @@
                                                         <div className="font-bold">{safeFormatDate(p.fecha)}</div>
                                                         <div className="text-xs text-slate-400">{safeFormatTime(p.fecha)}</div>
                                                     </td>
-                                                    <td className="px-6 py-4 font-bold text-slate-800">{p.clienteNombre}</td>
+                                                    <td className="px-6 py-4 font-bold text-slate-800">[{p.clienteId || 'S/N'}] {p.clienteNombre}</td>
                                                     <td className="px-6 py-4 text-center font-medium text-slate-600">{p.totalItems || 0}</td>
                                                     <td className="px-6 py-4 text-right font-black text-blue-900">${Number(p.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                                     <td className="px-6 py-4 text-center">
@@ -1560,7 +1634,7 @@
                 if (currentUser && currentUser.rol === 'gerente') {
                     basePedidos = basePedidos.filter(p => {
                         const seller = users.find(u => u.id === p.vendedorId);
-                        return seller && seller.supervisor === currentUser.id;
+                        return seller && normalizeId(seller.supervisor) === normalizeId(currentUser.id);
                     });
                 }
                 
@@ -1723,7 +1797,8 @@
                 else if (type === 'cxc') {
                     const clientsMap = {};
                     rows.forEach((row, index) => {
-                        const idC = String(getSafeVal(row, ['Id Cliente', 'ID', 'Codigo']) || '').trim();
+                        const rawIdC = String(getSafeVal(row, ['Id Cliente', 'ID', 'Codigo', 'CodCliente']) || '').trim();
+                        const idC = /^\d+$/.test(rawIdC) ? rawIdC.padStart(6, '0') : rawIdC;
                         const nomC = String(getSafeVal(row, ['Cliente', 'Nombre', 'Razon Social']) || '').trim();
                         const fecha = String(getSafeVal(row, ['Fecha', 'Emision', 'Date']) || '').trim();
                         const numero = String(getSafeVal(row, ['Numero', 'Documento', 'Factura']) || '').trim();
@@ -1774,12 +1849,18 @@
                         const p = vStr.split('-');
                         const idV = p[0].trim();
                         const nomV = p.slice(1).join('-').trim() || vStr;
+                        const idClienteVal = getSafeVal(row, ['Id Cliente', 'ID', 'ID_Cliente', 'Codigo', 'CodCliente']);
+                        let idC = idClienteVal !== undefined && idClienteVal !== null ? String(idClienteVal).trim() : '';
+                        if (/^\d+$/.test(idC)) {
+                            idC = idC.padStart(6, '0');
+                        }
                         return {
                             idVendedor: idV,
                             vendedorNombre: nomV,
+                            idCliente: idC || 'S/N',
                             cliente: cVal ? String(cVal).trim() : 'Desconocido'
                         };
-                    }).filter(c => c.cliente && c.cliente !== 'Desconocido' && c.idVendedor);
+                    }).filter(c => c.cliente && c.cliente !== 'Desconocido' && c.idVendedor && c.idCliente);
 
                     if (newCartera.length === 0) throw new Error('El archivo no contiene la información con las columnas correctas.');
 
@@ -1879,7 +1960,7 @@
                                     <h2 className="text-lg font-black text-blue-900 flex items-center gap-2"><Printer className="text-orange-500" /> Impresión Masiva de Pedidos</h2>
                                     <div className="flex items-center gap-3">
                                         <button 
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 if (!window.html2pdf) { openModal('alert', null, 'Error', 'El módulo de impresión aún se está cargando.', true); return; }
                                                 const element = document.getElementById('bulk-print-container');
                                                 const opt = {
@@ -1890,7 +1971,26 @@
                                                     jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
                                                     pagebreak: { mode: ['css', 'legacy'] }
                                                 };
-                                                window.html2pdf().set(opt).from(element).save();
+                                                try {
+                                                    await window.html2pdf().set(opt).from(element).save();
+                                                    // Auto-aprobar todos los pedidos impresos que no estén ya aprobados
+                                                    const toApprove = selectedPedidos.filter(id => {
+                                                        const p = pedidos.find(p => p.id === id);
+                                                        return p && p.estado !== 'Aprobado';
+                                                    });
+                                                    if (toApprove.length > 0) {
+                                                        const chunks = chunkArray(toApprove, 450);
+                                                        for (const chunk of chunks) {
+                                                            const batch = writeBatch(db);
+                                                            chunk.forEach(id => {
+                                                                batch.update(doc(db, getCollectionPath('pedidos'), id), { estado: 'Aprobado' });
+                                                            });
+                                                            await batch.commit();
+                                                        }
+                                                    }
+                                                } catch (err) {
+                                                    console.error('Error en impresión masiva o auto-aprobación:', err);
+                                                }
                                             }} 
                                             className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl flex items-center gap-2 transition-colors shadow-sm text-sm"
                                         >
@@ -1931,7 +2031,7 @@
                                                                 {/* HEADER ROW 1 */}
                                                                 <tr style={{ borderBottom: '1px solid #64748b' }}>
                                                                     <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>CLIENTE</td>
-                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 700 }} colSpan={2}>{pedido.clienteNombre}{totalPages > 1 ? ` (${pageIdx+1}/${totalPages})` : ''}</td>
+                                                                    <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 700 }} colSpan={2}>[{pedido.clienteId || 'S/N'}] {pedido.clienteNombre}{totalPages > 1 ? ` (${pageIdx+1}/${totalPages})` : ''}</td>
                                                                     <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>FECHA</td>
                                                                     <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', textAlign: 'center' }}>{safeFormatDate(pedido.fecha)}</td>
                                                                     <td style={{ borderRight: '1px solid #64748b', padding: '2px 3px', fontWeight: 900, textAlign: 'center', background: '#e2e8f0' }}>FACT</td>
@@ -2135,7 +2235,7 @@
                                                         <div className="text-xs text-slate-400">{safeFormatTime(p.fecha)}</div>
                                                     </td>
                                                     <td className="px-6 py-4 font-bold text-slate-700 text-xs">{p.vendedorId} - {p.vendedorNombre}</td>
-                                                    <td className="px-6 py-4 font-bold text-slate-800 text-xs">{p.clienteNombre} <span className="block text-[10px] font-bold text-blue-500 mt-1 uppercase">{p.listaPrecio}</span></td>
+                                                    <td className="px-6 py-4 font-bold text-slate-800 text-xs">[{p.clienteId || 'S/N'}] {p.clienteNombre} <span className="block text-[10px] font-bold text-blue-500 mt-1 uppercase">{p.listaPrecio}</span></td>
                                                     <td className="px-6 py-4 text-center">
                                                         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${p.estado === 'Aprobado' ? 'bg-green-100 text-green-700' : p.estado === 'Rechazado' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{p.estado || 'Pendiente'}</span>
                                                     </td>
@@ -2765,7 +2865,12 @@
                 try {
                     let roleSales = sales;
                     if (currentUser.rol === 'gerente') {
-                        const subs = users.filter(u => u.rol === 'vendedor' && u.supervisor === currentUser.id).map(u => normalizeId(u.id));
+                        const mySupervisorsIds = users
+                            .filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(currentUser.id))
+                            .map(u => normalizeId(u.id));
+                        const subs = users
+                            .filter(u => u.rol === 'vendedor' && (normalizeId(u.supervisor) === normalizeId(currentUser.id) || mySupervisorsIds.includes(normalizeId(u.supervisor))))
+                            .map(u => normalizeId(u.id));
                         roleSales = sales.filter(s => subs.includes(normalizeId(s.idVendedor)));
                     }
 
@@ -2969,7 +3074,12 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     return sales.filter(s => normalizeId(s.idVendedor) === normId);
                 }
                 if (currentUser.rol === 'gerente') {
-                    const subs = users.filter(u => u.rol === 'vendedor' && u.supervisor === currentUser.id).map(u => normalizeId(u.id));
+                    const mySupervisorsIds = users
+                        .filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(currentUser.id))
+                        .map(u => normalizeId(u.id));
+                    const subs = users
+                        .filter(u => u.rol === 'vendedor' && (normalizeId(u.supervisor) === normalizeId(currentUser.id) || mySupervisorsIds.includes(normalizeId(u.supervisor))))
+                        .map(u => normalizeId(u.id));
                     return sales.filter(s => subs.includes(normalizeId(s.idVendedor)));
                 }
                 return [];
@@ -3046,7 +3156,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (selectedGerentes.length > 0) {
                     filtered = filtered.filter(s => {
                         const seller = users.find(u => normalizeId(u.id) === normalizeId(s.idVendedor) || u.id === s.idVendedor);
-                        return seller && selectedGerentes.includes(seller.supervisor);
+                        return seller && selectedGerentes.some(gId => normalizeId(seller.supervisor) === normalizeId(gId));
                     });
                 }
 
@@ -4592,7 +4702,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             const metasInputRef = useRef(null);
 
             const [selectedCarteraFile, setSelectedCarteraFile] = useState(null);
-            const [userForm, setUserForm] = useState({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "", listaBase: "", listasVisibles: [] });
+            const [userForm, setUserForm] = useState({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "", listaBase: "", listasVisibles: [], permisos: [], supervisoresAsociados: [] });
 
             const handleCarteraFileSelect = async (e) => {
                 const file = e.target.files[0];
@@ -4608,11 +4718,25 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             const excelRows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
                             const novaCartera = excelRows.map(row => {
-                                const vStr = String(row['Vendedor'] || row['Venedor'] || '').trim();
-                                const p = vStr.split('-');
-                                const idV = p[0].trim(); const nomV = p.slice(1).join('-').trim() || vStr;
-                                return { idVendedor: idV, vendedorNombre: nomV, cliente: String(row['Cliente'] || row['Client'] || 'Cliente Desconocido').trim() };
-                            }).filter(c => c.cliente && c.idVendedor);
+                                const vStr = (() => { const vVal = getSafeVal(row, ['Id Vendedor', 'ID Vendedor', 'IdVendedor', 'CodVendedor', 'Vendedor', 'Venedor', 'Vendedor RUTA', 'RUTA']); return vVal ? String(vVal).trim() : ''; })();
+                                let idV = '';
+                                let nomV_extracted = '';
+                                if (vStr.includes('-')) {
+                                    const parts = vStr.split('-');
+                                    idV = parts[0].trim();
+                                    nomV_extracted = parts.slice(1).join('-').trim();
+                                } else {
+                                    idV = vStr;
+                                }
+                                const sellerUser = users.find(u => normalizeId(u.id) === normalizeId(idV));
+                                const nomV = sellerUser ? sellerUser.nombre : (nomV_extracted || idV || 'Desconocido');
+                                return { 
+                                    idVendedor: idV, 
+                                    vendedorNombre: nomV, 
+                                    idCliente: (() => { const idVal = getSafeVal(row, ['Id Cliente', 'ID', 'ID_Cliente', 'Codigo', 'CodCliente']); let idStr = idVal !== undefined && idVal !== null ? String(idVal).trim() : ''; return /^\d+$/.test(idStr) ? idStr.padStart(6, '0') : idStr || 'S/N'; })(),
+                                    cliente: (() => { const cVal = getSafeVal(row, ['Cliente', 'Client', 'Nombre', 'Razon Social']); return cVal ? String(cVal).trim() : 'Cliente Desconocido'; })(), 
+                                };
+                            }).filter(c => c.cliente && c.idVendedor && c.idCliente);
 
                             if (novaCartera.length > 0) {
                                 const chunksDelete = chunkArray(cartera, 450);
@@ -4649,8 +4773,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             };
 
             const handleDownloadPlantillaCartera = () => {
-                let headerHtml = `<th>Vendedor</th><th>Cliente</th>`;
-                let sampleRowHtml = `<td>052 - EJEMPLO VENDEDOR</td><td>SUPERMERCADO DE PRUEBA C.A.</td>`;
+                let headerHtml = `<th>Id Vendedor</th><th>Id Cliente</th><th>Cliente</th>`;
+                let sampleRowHtml = `<td>052</td><td>001419</td><td>SUPERMERCADO DE PRUEBA C.A.</td>`;
                 const tableHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${headerHtml}</tr></thead><tbody><tr>${sampleRowHtml}</tr></tbody></table></body></html>`;
                 const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel' });
                 const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "plantilla_cartera_rutas.xls";
@@ -4724,8 +4848,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const idToSave = editingUserId || userForm.idPersonal;
                     const userPayload = { ...userForm, id: idToSave };
 
-                    if (userPayload.rol !== 'vendedor') {
+                    if (userPayload.rol === 'vendedor') {
+                        userPayload.supervisoresAsociados = [];
+                    } else if (userPayload.rol === 'admin') {
                         userPayload.supervisor = "";
+                        userPayload.listaBase = "";
+                        userPayload.listasVisibles = [];
+                        userPayload.supervisoresAsociados = [];
+                    } else if (userPayload.rol === 'gerente') {
                         userPayload.listaBase = "";
                         userPayload.listasVisibles = [];
                     }
@@ -4737,14 +4867,45 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         userPayload.metas = currentUserData.metas || { monto: 0, unidades: 0, cajas: 0, clientes: 0, grupos: {} };
                     }
                     await setDoc(doc(db, getCollectionPath('users'), idToSave), userPayload);
-                    setUserSaveStatus('success'); setUserForm({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "", listaBase: "", listasVisibles: [] }); setEditingUserId(null);
+
+                    if (userPayload.rol === 'gerente') {
+                        const asociados = userPayload.supervisoresAsociados || [];
+                        const updatesPromises = users.filter(u => u.rol === 'gerente' && u.id !== idToSave).map(async (u) => {
+                            if (asociados.includes(u.id)) {
+                                if (u.supervisor !== idToSave) {
+                                    await setDoc(doc(db, getCollectionPath('users'), u.id), { ...u, supervisor: idToSave });
+                                }
+                            } else {
+                                if (u.supervisor === idToSave) {
+                                    await setDoc(doc(db, getCollectionPath('users'), u.id), { ...u, supervisor: "" });
+                                }
+                            }
+                        });
+                        await Promise.all(updatesPromises);
+                    }
+
+                    setUserSaveStatus('success'); 
+                    setUserForm({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "", listaBase: "", listasVisibles: [], permisos: [], supervisoresAsociados: [] }); 
+                    setEditingUserId(null);
                 } catch (err) { console.error("Error guardando usuario", err); }
                 setTimeout(() => setUserSaveStatus('idle'), 3000);
             };
 
             const handleEditClick = (user) => {
                 setEditingUserId(user.id);
-                setUserForm({ nombre: user.nombre, idPersonal: user.id, email: user.email || "", password: user.password || "", rol: user.rol, supervisor: user.supervisor || "", listaBase: user.listaBase || "", listasVisibles: user.listasVisibles || [] });
+                const asociados = users.filter(u => u.rol === 'gerente' && u.supervisor === user.id).map(u => u.id);
+                setUserForm({ 
+                    nombre: user.nombre, 
+                    idPersonal: user.id, 
+                    email: user.email || "", 
+                    password: user.password || "", 
+                    rol: user.rol, 
+                    supervisor: user.supervisor || "", 
+                    listaBase: user.listaBase || "", 
+                    listasVisibles: user.listasVisibles || [], 
+                    permisos: user.permisos || [],
+                    supervisoresAsociados: asociados
+                });
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             };
 
@@ -5394,7 +5555,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                     </h2>
                                     <div className="flex items-center gap-4">
                                         {editingUserId && (
-                                            <button onClick={() => { setEditingUserId(null); setUserForm({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "" }); }} className="text-sm font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 bg-slate-100 px-4 py-2 rounded-xl transition-colors">
+                                            <button onClick={() => { setEditingUserId(null); setUserForm({ nombre: "", idPersonal: "", email: "", password: "", rol: "vendedor", supervisor: "", permisos: [] }); }} className="text-sm font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 bg-slate-100 px-4 py-2 rounded-xl transition-colors">
                                                 <X size={16} /> Cancelar Edición
                                             </button>
                                         )}
@@ -5441,16 +5602,58 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                         </div>
                                         {userForm.rol === 'vendedor' && (
                                             <div className="animate-fadeIn">
-                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignar a Supervisor</label>
+                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignar a Supervisor / Gerente</label>
                                                 <select required value={userForm.supervisor} onChange={(e) => setUserForm({ ...userForm, supervisor: e.target.value })} className="w-full border-2 border-orange-200 hover:border-orange-400 focus:border-orange-500 rounded-xl p-3.5 outline-none bg-orange-50 focus:bg-white transition-all font-bold text-orange-900 cursor-pointer">
                                                     <option value="" disabled>Seleccione un supervisor...</option>
-                                                    {users.filter(u => u.rol === 'gerente').map(g => (
+                                                    {users.filter(u => u.rol === 'gerente' && u.id !== userForm.idPersonal).map(g => (
+                                                        <option key={g.id} value={g.id}>{g.nombre} (ID: {g.id})</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                        {userForm.rol === 'gerente' && (
+                                            <div className="animate-fadeIn">
+                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Asignar a Gerente Superior (Opcional)</label>
+                                                <select value={userForm.supervisor || ''} onChange={(e) => setUserForm({ ...userForm, supervisor: e.target.value })} className="w-full border-2 border-indigo-200 hover:border-indigo-400 focus:border-indigo-500 rounded-xl p-3.5 outline-none bg-indigo-50/50 focus:bg-white transition-all font-bold text-indigo-900 cursor-pointer">
+                                                    <option value="">— Ninguno (Es Gerente de Ventas Principal) —</option>
+                                                    {users.filter(u => u.rol === 'gerente' && u.id !== userForm.idPersonal && u.id !== editingUserId).map(g => (
                                                         <option key={g.id} value={g.id}>{g.nombre} (ID: {g.id})</option>
                                                     ))}
                                                 </select>
                                             </div>
                                         )}
                                     </div>
+                                    {userForm.rol === 'gerente' && (
+                                        <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-6 animate-fadeIn">
+                                            <h4 className="font-black text-sm text-indigo-900 mb-4 flex items-center gap-2"><Users size={16} className="text-indigo-500" /> Supervisores de Venta a Cargo</h4>
+                                            <p className="text-xs text-slate-500 mb-4">Seleccione los supervisores de venta que reportarán directamente a este Gerente de Ventas:</p>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                {users.filter(u => u.rol === 'gerente' && u.id !== userForm.idPersonal && u.id !== editingUserId).map(g => {
+                                                    const isAssociated = userForm.supervisoresAsociados?.includes(g.id);
+                                                    return (
+                                                        <label key={g.id} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${isAssociated ? 'bg-white border-indigo-500 shadow-sm' : 'bg-slate-50/50 border-slate-200 hover:border-slate-300'}`}>
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={isAssociated || false}
+                                                                onChange={(e) => {
+                                                                    const current = userForm.supervisoresAsociados || [];
+                                                                    const next = e.target.checked 
+                                                                        ? [...current, g.id]
+                                                                        : current.filter(id => id !== g.id);
+                                                                    setUserForm({ ...userForm, supervisoresAsociados: next });
+                                                                }}
+                                                                className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500" 
+                                                            />
+                                                            <div className="overflow-hidden min-w-0">
+                                                                <p className="font-bold text-slate-800 text-xs truncate">{g.nombre}</p>
+                                                                <p className="text-[10px] text-slate-400 font-medium">ID: {g.id}</p>
+                                                            </div>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
                                     {userForm.rol === 'vendedor' && (() => {
                                         const listasDisponiblesAdmin = [...new Set((precios || []).map(p => p.lista).filter(Boolean))];
                                         return listasDisponiblesAdmin.length > 0 ? (
@@ -5490,6 +5693,49 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                             </div>
                                         ) : null;
                                     })()}
+
+                                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 animate-fadeIn">
+                                        <h4 className="font-black text-sm text-blue-900 mb-4 flex items-center gap-2"><Lock size={16} className="text-blue-500" /> Módulos y Permisos de Acceso</h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {[
+                                                { id: 'ventas-global', label: 'Panel Ventas Corporativo' },
+                                                { id: 'ventas-mes', label: 'Indicadores / Mi Equipo' },
+                                                { id: 'ventas-historico', label: 'Histórico de Ventas' },
+                                                { id: 'ventas-ia', label: 'Análisis con IA' },
+                                                { id: 'share-ventas', label: 'Market Share' },
+                                                { id: 'ventas-cartera-activacion', label: 'Cartera / Activación' },
+                                                { id: 'pedidos-vendedor', label: 'Toma de Pedidos' },
+                                                { id: 'pedidos-admin', label: 'Admin Pedidos / Catálogo' },
+                                                { id: 'gerente-mapa', label: 'Mapa de Visitas' },
+                                                { id: 'guia', label: 'Guía de Uso' },
+                                                { id: 'cxc', label: 'Cuentas por Cobrar (Cobranzas)' },
+                                                { id: 'admin-dashboard', label: 'Admin: Vista Global' },
+                                                { id: 'admin-ventas', label: 'Admin: Conexión GitHub' },
+                                                { id: 'admin-metas', label: 'Admin: Carga de Metas' },
+                                                { id: 'admin-usuarios', label: 'Admin: Gestión de Usuarios' },
+                                                { id: 'admin-cartera', label: 'Admin: Cargar Rutas' },
+                                                { id: 'admin-config', label: 'Admin: Configuración IA' },
+                                                { id: 'pedidos-aprobar', label: 'Pedidos: Aprobar/Gestionar' }
+                                            ].map(mod => (
+                                                <label key={mod.id} className="flex items-center gap-3 cursor-pointer hover:bg-white hover:shadow-sm rounded-xl p-3 border border-transparent hover:border-blue-100 transition-all">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={(userForm.permisos || []).includes(mod.id)}
+                                                        onChange={(e) => {
+                                                            const newPerms = e.target.checked
+                                                                ? [...(userForm.permisos || []), mod.id]
+                                                                : (userForm.permisos || []).filter(p => p !== mod.id);
+                                                            setUserForm({ ...userForm, permisos: newPerms });
+                                                        }}
+                                                        className="w-5 h-5 rounded accent-blue-600"
+                                                    />
+                                                    <span className="text-sm font-bold text-slate-700">{mod.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 mt-4 font-medium italic">* Si el usuario es Administrador, verá todos los módulos independientemente de esta selección (excepto si deseas restringirle específicamente).</p>
+                                    </div>
+
                                     <div className="pt-6 border-t border-slate-100 flex justify-end">
                                         <button type="submit" disabled={userSaveStatus === 'saving'} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-10 py-3.5 rounded-xl font-black transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3">
                                             {userSaveStatus === 'saving' ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : (editingUserId ? <Save size={20} /> : <UserPlus size={20} />)}
@@ -5774,10 +6020,15 @@ ${JSON.stringify(dataPayload, null, 2)}`;
         };
 
         // --- COMPONENTE AGREGADO PARA EVITAR ERRORES DE RENDERIZADO ---
-        const GerenteDashboard = ({ userId, users, sales, cartera, cxc }) => {
+        const GerenteDashboard = ({ userId, users, sales, cartera, cxc, initialTab = 'dashboard', currentUser }) => {
             const [expandedVendedorMeta, setExpandedVendedorMeta] = useState(null);
-            const [activeTab, setActiveTab] = useState('dashboard');
+            const [activeTab, setActiveTab] = useState(initialTab);
             const [expandedClienteCxc, setExpandedClienteCxc] = useState(null);
+            
+            // Sincronizar activeTab si initialTab cambia (por ejemplo al navegar desde el sidebar)
+            useEffect(() => {
+                setActiveTab(initialTab);
+            }, [initialTab]);
             const [selectedVendedorCartera, setSelectedVendedorCartera] = useState('');
             const [searchCliente, setSearchCliente] = useState('');
             
@@ -5786,7 +6037,19 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 return getLatestMonthStr(cmSales.length > 0 ? cmSales : sales);
             }, [sales]);
 
-            const myTeam = useMemo(() => users.filter(u => u.rol === 'vendedor' && u.supervisor === userId), [users, userId]);
+            const myTeam = useMemo(() => {
+                const isAdmin = currentUser?.rol === 'admin';
+                if (isAdmin) {
+                    return users.filter(u => u.rol === 'vendedor');
+                }
+                const supervisoresIds = users
+                    .filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(userId))
+                    .map(u => normalizeId(u.id));
+                return users.filter(u => 
+                    u.rol === 'vendedor' && 
+                    (normalizeId(u.supervisor) === normalizeId(userId) || supervisoresIds.includes(normalizeId(u.supervisor)))
+                );
+            }, [users, userId, currentUser]);
             const myTeamIds = useMemo(() => myTeam.map(u => normalizeId(u.id)), [myTeam]);
 
             const teamCxc = useMemo(() => {
@@ -6626,7 +6889,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             return {
                 source: fileObj.type,
                 fecha: fechaVal,
-                idCliente: String(getVal(['IdCliente', 'CodigoCliente', 'CodCliente']) || 'S/N').trim(),
+                idCliente: (() => { const rawId = String(getVal(['IdCliente', 'CodigoCliente', 'CodCliente', 'Id Cliente', 'ID_Cliente']) || 'S/N').trim(); return /^\d+$/.test(rawId) ? rawId.padStart(6, '0') : rawId; })(),
                 cliente: clienteVal,
                 grupo: String(getVal(['Grupo', 'Subgrupo', 'Linea', 'Marca']) || 'GENERAL').trim().toUpperCase(),
                 idVendedor: String(getVal(['IdVendedor', 'CodigoVendedor', 'CodVendedor']) || 'S/N').trim(),
@@ -6774,6 +7037,46 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             const [loginError, setLoginError] = useState("");
             const [isDropdownOpen, setIsDropdownOpen] = useState(false);
             const [globalActiveTab, setGlobalActiveTab] = useState('ventas-mes');
+
+            const PREFERRED_TABS = [
+                'ventas-global',
+                'ventas-mes',
+                'pedidos-vendedor',
+                'pedidos-admin',
+                'ventas-historico',
+                'ventas-cartera-activacion',
+                'cxc',
+                'ventas-ia',
+                'share-ventas',
+                'gerente-mapa',
+                'guia'
+            ];
+
+            const hasPermForUser = (id, user) => {
+                if (!user) return false;
+                if (user.rol === 'admin' && (!user.permisos || !Array.isArray(user.permisos) || user.permisos.length === 0)) return true;
+                if (user.permisos && Array.isArray(user.permisos) && user.permisos.length > 0) return user.permisos.includes(id);
+                
+                const rol = user.rol;
+                if (id.startsWith('admin-')) return rol === 'admin';
+                if (id === 'ventas-global') return rol === 'admin';
+                if (id === 'ventas-mes') return true;
+                if (id === 'ventas-historico') return true;
+                if (id === 'ventas-ia') return rol === 'admin' || rol === 'gerente';
+                if (id === 'share-ventas') return rol === 'admin' || rol === 'gerente';
+                if (id === 'ventas-cartera-activacion') return true;
+                if (id === 'pedidos-vendedor') return true;
+                if (id === 'pedidos-admin') return rol === 'admin' || rol === 'gerente';
+                if (id === 'gerente-mapa') return rol === 'admin' || rol === 'gerente';
+                if (id === 'guia') return true;
+                if (id === 'cxc') return rol === 'admin' || rol === 'gerente';
+                if (id === 'pedidos-aprobar') return rol === 'admin' || rol === 'gerente';
+                return false;
+            };
+
+            const hasPerm = (id) => {
+                return hasPermForUser(id, currentUser);
+            };
 
             useEffect(() => {
                 const initAuth = async () => {
@@ -6950,7 +7253,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (!userToLogin) { setLoginError("Selecciona un usuario de la lista."); return; }
                 if (userToLogin.password === loginPassword) {
                     setCurrentUser(userToLogin);
-                    setGlobalActiveTab(userToLogin.rol === 'admin' ? 'ventas-global' : userToLogin.rol === 'gerente' ? 'ventas-mes' : 'ventas-mes');
+                    const firstTab = PREFERRED_TABS.find(tabId => hasPermForUser(tabId, userToLogin)) || 'ventas-mes';
+                    setGlobalActiveTab(firstTab);
                     setLoginPassword(""); setSearchUserQuery(""); setSelectedUserId(null); setLoginError("");
                 } else { setLoginError("Contraseña incorrecta"); }
             };
@@ -6959,12 +7263,11 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
             useEffect(() => {
                 if (!currentUser) return;
-                if (currentUser.rol === 'vendedor') {
-                    if (['ventas-global', 'pedidos-admin'].includes(globalActiveTab)) setGlobalActiveTab('ventas-mes');
-                } else if (currentUser.rol === 'gerente') {
-                    if (['ventas-cartera-activacion'].includes(globalActiveTab)) setGlobalActiveTab('ventas-mes');
+                if (!hasPerm(globalActiveTab)) {
+                    const firstTab = PREFERRED_TABS.find(tabId => hasPermForUser(tabId, currentUser)) || 'ventas-mes';
+                    setGlobalActiveTab(firstTab);
                 }
-            }, [currentUser?.id, currentUser?.rol]);
+            }, [currentUser?.id, currentUser?.rol, currentUser?.permisos, globalActiveTab]);
 
             if (!isDbReady) {
                 return (
@@ -7025,11 +7328,13 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             }
 
             const NavBtn = ({ id, icon: Icon, children }) => (
-                <div onClick={() => { flushSync(() => setGlobalActiveTab(id)); }}
+                <div onClick={() => setGlobalActiveTab(id)}
                     className={`p-3 rounded-lg flex items-center gap-3 cursor-pointer transition-colors ${globalActiveTab === id ? 'bg-blue-800/50 text-orange-400 border border-blue-700/50' : 'text-blue-200 hover:bg-blue-800 hover:text-white'}`}>
                     <Icon size={20} /><span className="font-medium text-sm">{children}</span>
                 </div>
             );
+
+            // Permisos e inicialización reubicados al inicio del componente para correcto alcance de variables
 
             return (
                 <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
@@ -7042,21 +7347,25 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         </div>
                         <nav className="flex-1 px-4 space-y-1 pb-4">
                             <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-2 pb-1">Ventas / BI</p>
-                            {currentUser.rol === 'admin' && <NavBtn id="ventas-global" icon={LayoutDashboard}>Panel ventas (corp.)</NavBtn>}
-                            {(currentUser.rol === 'vendedor' || currentUser.rol === 'admin') && <NavBtn id="ventas-mes" icon={LayoutDashboard}>Indicadores (mes)</NavBtn>}
-                            {currentUser.rol === 'gerente' && <NavBtn id="ventas-mes" icon={LayoutDashboard}>Mi equipo (mes)</NavBtn>}
-                            <NavBtn id="ventas-historico" icon={History}>Histórico ventas</NavBtn>
-                            {(currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <NavBtn id="ventas-ia" icon={Sparkles}>Análisis IA</NavBtn>}
-                            {(currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <NavBtn id="share-ventas" icon={() => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>}>Market Share</NavBtn>}
-                            {currentUser.rol === 'vendedor' && <NavBtn id="ventas-cartera-activacion" icon={BookOpen}>Cartera (activación)</NavBtn>}
+                            {hasPerm('ventas-global') && <NavBtn id="ventas-global" icon={LayoutDashboard}>Panel ventas (corp.)</NavBtn>}
+                            {hasPerm('ventas-mes') && (
+                                <>
+                                    {currentUser.rol === 'gerente' ? <NavBtn id="ventas-mes" icon={LayoutDashboard}>Mi equipo (mes)</NavBtn> : <NavBtn id="ventas-mes" icon={LayoutDashboard}>Indicadores (mes)</NavBtn>}
+                                </>
+                            )}
+                            {hasPerm('ventas-historico') && <NavBtn id="ventas-historico" icon={History}>Histórico ventas</NavBtn>}
+                            {hasPerm('ventas-ia') && <NavBtn id="ventas-ia" icon={Sparkles}>Análisis IA</NavBtn>}
+                            {hasPerm('share-ventas') && <NavBtn id="share-ventas" icon={() => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>}>Market Share</NavBtn>}
+                            {hasPerm('ventas-cartera-activacion') && <NavBtn id="ventas-cartera-activacion" icon={BookOpen}>Cartera (activación)</NavBtn>}
 
-                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1">Pedidos</p>
-                            {(currentUser.rol === 'vendedor' || currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <NavBtn id="pedidos-vendedor" icon={ShoppingCart}>Tomar pedidos</NavBtn>}
-                            {(currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <NavBtn id="pedidos-admin" icon={Receipt}>Admin pedidos / catálogo</NavBtn>}
-                            {(currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <NavBtn id="gerente-mapa" icon={MapIcon}>Mapa de visitas</NavBtn>}
+                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1">Pedidos y Finanzas</p>
+                            {hasPerm('pedidos-vendedor') && <NavBtn id="pedidos-vendedor" icon={ShoppingCart}>Tomar pedidos</NavBtn>}
+                            {hasPerm('pedidos-admin') && <NavBtn id="pedidos-admin" icon={Receipt}>Admin pedidos / catálogo</NavBtn>}
+                            {hasPerm('cxc') && <NavBtn id="cxc" icon={Wallet}>Cobranzas (CxC)</NavBtn>}
+                            {hasPerm('gerente-mapa') && <NavBtn id="gerente-mapa" icon={MapIcon}>Mapa de visitas</NavBtn>}
 
                             <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1">Ayuda</p>
-                            <NavBtn id="guia" icon={HelpCircle}>Guía de uso</NavBtn>
+                            {hasPerm('guia') && <NavBtn id="guia" icon={HelpCircle}>Guía de uso</NavBtn>}
                         </nav>
                         <div className="p-4 border-t border-blue-800 mt-auto shrink-0">
                             <div className="flex items-center gap-3 mb-4">
@@ -7074,18 +7383,19 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         </header>
                         <div className="bg-white border-b border-slate-200 flex md:hidden overflow-x-auto print-hide">
                             {[
-                                ...(currentUser.rol === 'admin' ? [['ventas-global', 'Corp.']] : []),
-                                ['ventas-mes', 'Mes'],
-                                ['ventas-historico', 'Hist.'],
-                                ...((currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? [['ventas-ia', 'IA']] : []),
-                                ...((currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? [['share-ventas', 'M.Share']] : []),
-                                ...(currentUser.rol === 'vendedor' ? [['ventas-cartera-activacion', 'Activa.']] : []),
-                                ...((currentUser.rol === 'vendedor' || currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? [['pedidos-vendedor', 'Pedidos']] : []),
-                                ...((currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? [['pedidos-admin', 'Adm.Ped.']] : []),
-                                ...((currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? [['gerente-mapa', 'Mapa']] : []),
-                                ['guia', 'Guía'],
+                                ...(hasPerm('ventas-global') ? [['ventas-global', 'Corp.']] : []),
+                                ...(hasPerm('ventas-mes') ? [['ventas-mes', 'Mes']] : []),
+                                ...(hasPerm('ventas-historico') ? [['ventas-historico', 'Hist.']] : []),
+                                ...(hasPerm('ventas-ia') ? [['ventas-ia', 'IA']] : []),
+                                ...(hasPerm('share-ventas') ? [['share-ventas', 'M.Share']] : []),
+                                ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []),
+                                ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []),
+                                ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []),
+                                ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []),
+                                ...(hasPerm('gerente-mapa') ? [['gerente-mapa', 'Mapa']] : []),
+                                ...(hasPerm('guia') ? [['guia', 'Guía']] : []),
                             ].map(([id, label]) => (
-                                <button key={id} onClick={() => { flushSync(() => setGlobalActiveTab(id)); }}
+                                <button key={id} onClick={() => setGlobalActiveTab(id)}
                                     className={`px-3 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${globalActiveTab === id ? 'border-orange-400 text-orange-200' : 'border-transparent text-blue-200'}`}>{label}</button>
                             ))}
                         </div>
@@ -7125,13 +7435,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             {globalActiveTab === 'share-ventas' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <MarketSharePanel sales={deferredSalesData} users={users} />}
                             {globalActiveTab === 'ventas-historico' && <HistoricoDashboard currentUser={currentUser} sales={deferredSalesData} users={users} />}
                             {globalActiveTab === 'ventas-cartera-activacion' && currentUser.rol === 'vendedor' && <VentasVendedorDashboard userId={currentUser.id} sales={deferredSalesData} metas={metasDiccionario} cartera={carteraData} activeTab="cartera" />}
+                            {globalActiveTab === 'ventas-cartera-activacion' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <GerenteDashboard userId={currentUser.id} users={users} sales={deferredSalesData} cartera={carteraData} cxc={cxcData} initialTab="cartera" currentUser={currentUser} />}
                             {globalActiveTab === 'ventas-mes' && currentUser.rol === 'vendedor' && <VentasVendedorDashboard userId={currentUser.id} sales={deferredSalesData} metas={metasDiccionario} cartera={carteraData} activeTab="dashboard" />}
-                            {globalActiveTab === 'ventas-mes' && currentUser.rol === 'gerente' && <GerenteDashboard userId={currentUser.id} users={users} sales={deferredSalesData} cartera={carteraData} cxc={cxcData} />}
+                            {globalActiveTab === 'ventas-mes' && (currentUser.rol === 'gerente' || currentUser.rol === 'admin') && <GerenteDashboard userId={currentUser.id} users={users} sales={deferredSalesData} cartera={carteraData} cxc={cxcData} currentUser={currentUser} />}
                             {globalActiveTab === 'ventas-global' && currentUser.rol === 'admin' && <VentasAdminPanel sales={deferredSalesData} setSales={setSalesData} users={users} setUsers={setUsers} cartera={carteraData} setCartera={setCarteraData} openModal={openModal} appConfig={appConfig} setAppConfig={setAppConfig} precios={preciosData} />}
-                            {globalActiveTab === 'ventas-mes' && currentUser.rol === 'admin' && <VentasAdminPanel sales={deferredSalesData} setSales={setSalesData} users={users} setUsers={setUsers} cartera={carteraData} setCartera={setCarteraData} openModal={openModal} appConfig={appConfig} setAppConfig={setAppConfig} precios={preciosData} />}
                             {globalActiveTab === 'pedidos-vendedor' && (currentUser.rol === 'vendedor' || currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <PedidosVendedorDashboard currentUser={currentUser} cartera={carteraData} catalog={fullCatalogWithPrices} precios={preciosData} pedidos={pedidosData} cxc={cxcData} openModal={openModal} />}
                             {globalActiveTab === 'pedidos-admin' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <PedidosAdminPanel currentUser={currentUser} users={users} cartera={carteraData} catalog={catalogData} precios={preciosData} pedidos={pedidosData} cxc={cxcData} openModal={openModal} db={db} getCollectionPath={getCollectionPath} />}
                             {globalActiveTab === 'gerente-mapa' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <AdminZonasMap pedidos={pedidosData} users={users} currentUser={currentUser} />}
+                            {globalActiveTab === 'cxc' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <GerenteDashboard userId={currentUser.id} users={users} sales={deferredSalesData} cartera={carteraData} cxc={cxcData} initialTab="cxc" currentUser={currentUser} />}
                         </div>
                     </main>
                 </div>
