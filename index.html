@@ -3378,7 +3378,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         if (s.monto > 0) clientesUnicosSet.add(s.idCliente);
 
                         // Agregación Main para Rankings
-                        const ven = ensureEntity(topVendedoresMap, s.idVendedor, { nombre: s.vendedor });
+                        const venKey = s.vendedor ? String(s.vendedor).trim().toUpperCase() : (s.idVendedor ? String(s.idVendedor).trim() : 'S/N');
+                        const ven = ensureEntity(topVendedoresMap, venKey, { nombre: s.vendedor || 'Vendedor Desconocido' });
                         ven.mainMonto += s.monto; ven.mainCajas += s.cajas || 0; ven.mainKilos += s.kilos || 0; ven.mainUnidades += s.unidades || 0;
 
                         const cli = ensureEntity(topClientsMap, s.cliente, { nombre: s.cliente, productosVendidos: {} });
@@ -3409,7 +3410,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         if (s.monto > 0) clientesUnicosCompSet.add(s.idCliente);
 
                         // Agregación Comp para Rankings
-                        const ven = ensureEntity(topVendedoresMap, s.idVendedor, { nombre: s.vendedor });
+                        const venKey = s.vendedor ? String(s.vendedor).trim().toUpperCase() : (s.idVendedor ? String(s.idVendedor).trim() : 'S/N');
+                        const ven = ensureEntity(topVendedoresMap, venKey, { nombre: s.vendedor || 'Vendedor Desconocido' });
                         ven.compMonto += s.monto; ven.compCajas += s.cajas || 0; ven.compKilos += s.kilos || 0; ven.compUnidades += s.unidades || 0;
 
                         const cli = ensureEntity(topClientsMap, s.cliente, { nombre: s.cliente, productosVendidos: {} });
@@ -7412,11 +7414,13 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             } else if (getVal(['Mes', 'Month'])) {
                 const mesNum = parseInt(String(getVal(['Mes', 'Month'])).replace(/[^0-9]/g, ''), 10) || 1;
                 const mesStr = String(mesNum).padStart(2, '0');
-                let yearVal = getVal(['Año', 'Ano', 'Year']);
+                let yearVal = getVal(['Año', 'Ano', 'Year', 'Ao', 'Aao']);
                 let finalYear;
                 if (yearVal) {
                     finalYear = parseInt(String(yearVal).replace(/[^0-9]/g, ''), 10);
-                } else {
+                    if (isNaN(finalYear) || finalYear < 1900 || finalYear > 2100) finalYear = null;
+                } 
+                if (!finalYear) {
                     const currentYear = new Date().getFullYear();
                     finalYear = fileObj.type === 'prevYear' ? currentYear - 1 : currentYear;
                 }
@@ -7475,21 +7479,91 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
         async function fetchGithubSalesFile(fileObj, isStale) {
             let rawUrl = fileObj.url.trim();
-            if (rawUrl.includes('github.com') && rawUrl.includes('/blob/')) {
-                rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+            if (rawUrl.includes('github.com')) {
+                if (rawUrl.includes('/blob/')) {
+                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+                } else if (rawUrl.includes('/raw/')) {
+                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/');
+                }
             }
             const url = rawUrl + (rawUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
             const urlLower = url.toLowerCase();
+            
             try {
-                if (urlLower.includes('.json')) {
-                    const res = await fetch(url);
-                    if (!res.ok) throw new Error("No se pudo descargar el archivo JSON.");
+                const isJson = urlLower.includes('.json');
+                const isCsv = urlLower.includes('.csv');
+                const isExcel = urlLower.includes('.xls') || urlLower.includes('.xlsx');
+                
+                // Si la URL no tiene extensión pero tiene un token (ej. de un repo privado), asumimos excel por defecto.
+                const assumeExcel = !isJson && !isCsv && !isExcel && rawUrl.includes('?token=');
+                
+                if (!isJson && !isCsv && !isExcel && !assumeExcel) {
+                     console.warn(`Extensión no reconocida para ${fileObj.type}: ${urlLower}. Intentando como Excel...`);
+                }
+
+                const res = await fetch(url);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: Falló el enlace de "${fileObj.type === 'prevYear' ? 'Año Anterior' : fileObj.type === 'currYear' ? 'Año Actual' : 'Mes Actual'}". Puede haber expirado o estar incorrecto.`);
+                }
+
+                if (isJson) {
                     const data = await res.json();
                     return await parseJsonSalesChunked(data, fileObj.type, isStale);
-                }
-                if (urlLower.includes('.xls') || urlLower.includes('.csv') || urlLower.includes('.xlsx')) {
-                    const res = await fetch(url);
-                    if (!res.ok) throw new Error("No se pudo descargar el archivo Excel.");
+                } else if (isCsv) {
+                    const arrayBuffer = await res.arrayBuffer();
+                    await yieldToBrowser();
+                    let decoder = new TextDecoder('windows-1252');
+                    let text = decoder.decode(arrayBuffer);
+                    const separator = text.split('\n')[0].includes(';') ? ';' : ',';
+                    const result = [];
+                    let row = [];
+                    let col = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < text.length; i++) {
+                        const char = text[i];
+                        if (inQuotes) {
+                            if (char === '"') {
+                                if (i + 1 < text.length && text[i + 1] === '"') {
+                                    col += '"';
+                                    i++;
+                                } else {
+                                    inQuotes = false;
+                                }
+                            } else {
+                                col += char;
+                            }
+                        } else {
+                            if (char === '"') {
+                                inQuotes = true;
+                            } else if (char === separator) {
+                                row.push(col);
+                                col = '';
+                            } else if (char === '\n') {
+                                row.push(col);
+                                result.push(row);
+                                row = [];
+                                col = '';
+                            } else if (char === '\r') {
+                            } else {
+                                col += char;
+                            }
+                        }
+                    }
+                    if (col || row.length > 0) {
+                        row.push(col);
+                        result.push(row);
+                    }
+                    if (result.length < 2) return [];
+                    const headers = result[0].map(h => h.trim());
+                    const excelRows = result.slice(1).map(r => {
+                        const obj = {};
+                        for (let i = 0; i < headers.length; i++) {
+                            obj[headers[i]] = r[i] !== undefined ? r[i].trim() : '';
+                        }
+                        return obj;
+                    });
+                    return await parseExcelRowsChunked(excelRows, fileObj, isStale);
+                } else {
                     const arrayBuffer = await res.arrayBuffer();
                     await yieldToBrowser();
                     if (!window.XLSX) throw new Error("XLSX no disponible");
@@ -7499,10 +7573,9 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const excelRows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
                     return await parseExcelRowsChunked(excelRows, fileObj, isStale);
                 }
-                return [];
             } catch (e) {
                 console.error(`Error procesando archivo ${fileObj.type}:`, e);
-                return [];
+                throw e; // Propagar el error para no devolver un array vacío y borrar los datos existentes
             }
         }
 
@@ -7714,7 +7787,9 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                         if (isStale()) return;
                         await yieldToBrowser();
                         const part = await fetchGithubSalesFile(fileObj, isStale);
-                        combinedSales.push(...part);
+                        for (let i = 0; i < part.length; i++) {
+                            combinedSales.push(part[i]);
+                        }
                     }
                     if (isStale()) return;
 
@@ -7736,7 +7811,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
                 } catch (err) {
                     console.error("Error crítico cargando ventas:", err);
-                    if (!cachedSales && !isStale()) openModal('alert', null, 'Error de Sincronización', 'Hubo un error al procesar los archivos de GitHub.', true);
+                    if (!isStale()) openModal('alert', null, 'Error de Sincronización', err.message || 'Hubo un error al procesar los archivos de GitHub.', true);
                 } finally {
                     if (!isStale()) setIsFetchingSales(false);
                 }
