@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="es">
-<head>
+<head>\n
+<script>
+window.onerror = function(msg, url, line, col, error) {
+  alert('Error: ' + msg + '\nLine: ' + line + '\nCol: ' + col + '\n' + (error && error.stack ? error.stack : ''));
+};
+window.addEventListener('unhandledrejection', function(event) {
+  alert('Unhandled Promise Rejection:\n' + (event.reason ? (event.reason.stack || event.reason.message || event.reason) : 'Unknown'));
+});
+</script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>COMACA 360 — Ventas y Pedidos</title>
