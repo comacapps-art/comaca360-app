@@ -7747,7 +7747,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 }
             }, []);
 
-            const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null) => {
+            const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null, includePrevYear = true) => {
                 const isStale = externalIsStale || (() => false);
                 if (!appConfig || !currentUser) return;
 
@@ -7771,7 +7771,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 }
 
                 const urls = [
-                    { url: appConfig?.githubSalesUrlPrevYear, type: 'prevYear' },
+                    ...(includePrevYear ? [{ url: appConfig?.githubSalesUrlPrevYear, type: 'prevYear' }] : []),
                     { url: appConfig?.githubSalesUrlCurrYear, type: 'currYear' },
                     { url: appConfig?.githubSalesUrlCurrMonth, type: 'currMonth' }
                 ].filter(item => item.url && item.url.trim() !== "");
@@ -7783,7 +7783,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
                 if (!isStale()) setIsFetchingSales(true);
                 try {
-                    const combinedSales = [];
+                    // Si se difiere el año anterior, conservamos lo que ya hubiera en caché para no perderlo de la vista.
+                    const combinedSales = includePrevYear ? [] : (cachedSales || []).filter(s => s.source === 'prevYear');
                     for (const fileObj of urls) {
                         if (isStale()) return;
                         await yieldToBrowser();
@@ -7828,13 +7829,49 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 const isStale = () => cancelled;
 
                 if (isConfigLoaded && currentUser) {
-                    fetchGitHubData(false, isStale);
+                    // Al entrar se difiere el año anterior (el archivo más pesado) para no saturar
+                    // la memoria justo al loguear — esto es lo que hacía crashear Safari en iPhone.
+                    // Se carga bajo demanda al entrar a "Histórico" o "IA" (ver ensurePrevYearLoaded).
+                    fetchGitHubData(false, isStale, false);
                 } else if (!isConfigLoaded || !currentUser) {
                     startSalesTransition(() => setSalesData([]));
                 }
 
                 return () => { cancelled = true; };
             }, [appConfig?.githubSalesUrlPrevYear, appConfig?.githubSalesUrlCurrYear, appConfig?.githubSalesUrlCurrMonth, isConfigLoaded, currentUser?.id, fetchGitHubData]);
+
+            const prevYearFetchStateRef = React.useRef('idle');
+
+            const ensurePrevYearLoaded = React.useCallback(async () => {
+                if (!appConfig?.githubSalesUrlPrevYear || !currentUser) return;
+                if (prevYearFetchStateRef.current !== 'idle') return;
+                if (salesData.some(s => s.source === 'prevYear')) { prevYearFetchStateRef.current = 'done'; return; }
+                prevYearFetchStateRef.current = 'loading';
+                setIsFetchingSales(true);
+                try {
+                    const rows = await fetchGithubSalesFile({ url: appConfig.githubSalesUrlPrevYear, type: 'prevYear' }, () => false);
+                    startSalesTransition(() => {
+                        setSalesData(prev => {
+                            const merged = [...prev.filter(s => s.source !== 'prevYear'), ...rows];
+                            scheduleHeavyWrite(() => saveToCache('salesData', merged));
+                            return merged;
+                        });
+                    });
+                    prevYearFetchStateRef.current = 'done';
+                } catch (err) {
+                    console.error("Error cargando año anterior:", err);
+                    prevYearFetchStateRef.current = 'idle';
+                    openModal('alert', null, 'Error de Sincronización', err.message || 'No se pudo cargar el histórico del año anterior.', true);
+                } finally {
+                    setIsFetchingSales(false);
+                }
+            }, [appConfig, currentUser, salesData]);
+
+            useEffect(() => {
+                if (globalActiveTab === 'ventas-historico' || globalActiveTab === 'ventas-ia') {
+                    ensurePrevYearLoaded();
+                }
+            }, [globalActiveTab, ensurePrevYearLoaded]);
 
             const metasDiccionario = useMemo(() => {
                 const dict = {};
@@ -7910,6 +7947,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             const handleLogout = () => {
                 try { localStorage.removeItem('comaca_session_userid'); } catch (e) { console.warn(e); }
                 setCurrentUser(null);
+                prevYearFetchStateRef.current = 'idle';
             };
 
             // Restaura la sesión guardada (evita re-login tras recargas silenciosas de iOS Safari)
