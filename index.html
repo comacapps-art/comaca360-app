@@ -4157,7 +4157,15 @@ const HistoricoDashboard = ({
     let filtered = roleSales;
     if (searchCliente) filtered = filtered.filter(s => s.cliente.toLowerCase().includes(searchCliente.toLowerCase()));
     if (searchCategoria) filtered = filtered.filter(s => s.grupo.toLowerCase().includes(searchCategoria.toLowerCase()));
-    if (selectedVendedores.length > 0) filtered = filtered.filter(s => selectedVendedores.includes(s.idVendedor));
+    if (selectedVendedores.length > 0) {
+      const selNormIds = new Set(selectedVendedores.map(normalizeId));
+      const selNames = new Set();
+      selectedVendedores.forEach(sv => {
+        const found = uniqueVendedores.find(v => v.id === sv);
+        if (found && found.nombre) selNames.add(normalizeName(found.nombre));
+      });
+      filtered = filtered.filter(s => selNormIds.has(normalizeId(s.idVendedor)) || s.vendedor && selNames.has(normalizeName(s.vendedor)));
+    }
     if (selectedGerentes.length > 0) {
       filtered = filtered.filter(s => {
         const seller = users.find(u => normalizeId(u.id) === normalizeId(s.idVendedor) || u.id === s.idVendedor);
@@ -4480,7 +4488,7 @@ const HistoricoDashboard = ({
       topCategorias,
       topProductos
     };
-  }, [roleSales, selectedYear, compareYear, searchCliente, searchCategoria, mainMonths, compareMonths, selectedVendedores, selectedGerentes, users, metricaCompare]);
+  }, [roleSales, selectedYear, compareYear, searchCliente, searchCategoria, mainMonths, compareMonths, selectedVendedores, selectedGerentes, users, metricaCompare, uniqueVendedores]);
   return React.createElement("div", {
     className: "space-y-6 animate-fadeIn"
   }, React.createElement("div", {
@@ -9597,7 +9605,19 @@ function mapGitHubSalesRow(row, fileObj) {
     kilos: parseNum(getVal(['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']))
   };
 }
-async function parseExcelRowsChunked(excelRows, fileObj, isCancelled) {
+function buildVendorFilter(user) {
+  if (!user || user.rol !== 'vendedor') return null;
+  const normUserId = normalizeId(user.id);
+  const uid = String(user.id);
+  return m => {
+    if (!m) return false;
+    const sId = normalizeId(m.idVendedor);
+    if (sId === normUserId) return true;
+    const v = m.vendedor;
+    return typeof v === 'string' && (v.startsWith(uid + " ") || v.startsWith(uid + "-") || v === uid);
+  };
+}
+async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter) {
   const out = [];
   const CHUNK = 1200;
   for (let i = 0; i < excelRows.length; i += CHUNK) {
@@ -9605,13 +9625,13 @@ async function parseExcelRowsChunked(excelRows, fileObj, isCancelled) {
     const end = Math.min(i + CHUNK, excelRows.length);
     for (let j = i; j < end; j++) {
       const m = mapGitHubSalesRow(excelRows[j], fileObj);
-      if (m) out.push(m);
+      if (m && (!rowFilter || rowFilter(m))) out.push(m);
     }
     await yieldToBrowser();
   }
   return out;
 }
-async function parseJsonSalesChunked(data, sourceType, isCancelled) {
+async function parseJsonSalesChunked(data, sourceType, isCancelled, rowFilter) {
   if (!Array.isArray(data)) return [];
   const out = [];
   const CHUNK = 4000;
@@ -9619,16 +9639,132 @@ async function parseJsonSalesChunked(data, sourceType, isCancelled) {
     if (isCancelled()) return out;
     const end = Math.min(i + CHUNK, data.length);
     for (let j = i; j < end; j++) {
-      out.push({
+      const m = {
         ...data[j],
         source: sourceType
-      });
+      };
+      if (!rowFilter || rowFilter(m)) out.push(m);
     }
     await yieldToBrowser();
   }
   return out;
 }
-async function fetchGithubSalesFile(fileObj, isStale) {
+async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
+  const out = [];
+  const decoder = new TextDecoder('windows-1252');
+  let headers = null;
+  let separator = null;
+  let field = '';
+  let row = [];
+  let inQuotes = false;
+  let pendingQuote = false;
+  let pending = '';
+  let sinceYield = 0;
+  const finishRow = () => {
+    row.push(field);
+    field = '';
+    if (row.length === 1 && row[0].trim() === '') {
+      row = [];
+      return;
+    }
+    if (!headers) {
+      headers = row.map(h => h.trim());
+      row = [];
+      return;
+    }
+    const obj = {};
+    for (let i = 0; i < headers.length; i++) {
+      obj[headers[i]] = row[i] !== undefined ? row[i].trim() : '';
+    }
+    row = [];
+    const m = mapGitHubSalesRow(obj, fileObj);
+    if (m && (!rowFilter || rowFilter(m))) out.push(m);
+  };
+  const processText = text => {
+    let i = 0;
+    if (pendingQuote) {
+      pendingQuote = false;
+      if (text.length === 0) {
+        pendingQuote = true;
+        return;
+      }
+      if (text[0] === '"') {
+        field += '"';
+        i = 1;
+      } else inQuotes = false;
+    }
+    for (; i < text.length; i++) {
+      const char = text[i];
+      if (inQuotes) {
+        if (char === '"') {
+          if (i + 1 < text.length) {
+            if (text[i + 1] === '"') {
+              field += '"';
+              i++;
+            } else inQuotes = false;
+          } else pendingQuote = true;
+        } else field += char;
+      } else {
+        if (char === '"') inQuotes = true;else if (char === separator) {
+          row.push(field);
+          field = '';
+        } else if (char === '\n') finishRow();else if (char === '\r') {} else field += char;
+      }
+    }
+  };
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const buf = await res.arrayBuffer();
+    let text = decoder.decode(buf);
+    separator = (text.split('\n')[0] || '').includes(';') ? ';' : ',';
+    processText(text);
+    if (field !== '' || row.length > 0) finishRow();
+    return out;
+  }
+  const reader = res.body.getReader();
+  while (true) {
+    const {
+      done,
+      value
+    } = await reader.read();
+    if (isCancelled()) {
+      try {
+        reader.cancel();
+      } catch (e) {}
+      return out;
+    }
+    if (done) break;
+    let text = decoder.decode(value, {
+      stream: true
+    });
+    if (separator === null) {
+      pending += text;
+      const nl = pending.indexOf('\n');
+      if (nl === -1 && pending.length < 8192) continue;
+      const sample = nl !== -1 ? pending.slice(0, nl) : pending;
+      separator = sample.includes(';') ? ';' : ',';
+      text = pending;
+      pending = '';
+    }
+    processText(text);
+    sinceYield += text.length;
+    if (sinceYield > 600000) {
+      sinceYield = 0;
+      await yieldToBrowser();
+    }
+  }
+  decoder.decode(new Uint8Array());
+  if (separator === null && pending) {
+    separator = pending.includes(';') ? ';' : ',';
+    processText(pending);
+  }
+  if (pendingQuote) {
+    inQuotes = false;
+    pendingQuote = false;
+  }
+  if (field !== '' || row.length > 0) finishRow();
+  return out;
+}
+async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
   let rawUrl = fileObj.url.trim();
   if (rawUrl.includes('github.com')) {
     if (rawUrl.includes('/blob/')) {
@@ -9653,60 +9789,9 @@ async function fetchGithubSalesFile(fileObj, isStale) {
     }
     if (isJson) {
       const data = await res.json();
-      return await parseJsonSalesChunked(data, fileObj.type, isStale);
+      return await parseJsonSalesChunked(data, fileObj.type, isStale, rowFilter);
     } else if (isCsv) {
-      const arrayBuffer = await res.arrayBuffer();
-      await yieldToBrowser();
-      let decoder = new TextDecoder('windows-1252');
-      let text = decoder.decode(arrayBuffer);
-      const separator = text.split('\n')[0].includes(';') ? ';' : ',';
-      const result = [];
-      let row = [];
-      let col = '';
-      let inQuotes = false;
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        if (inQuotes) {
-          if (char === '"') {
-            if (i + 1 < text.length && text[i + 1] === '"') {
-              col += '"';
-              i++;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            col += char;
-          }
-        } else {
-          if (char === '"') {
-            inQuotes = true;
-          } else if (char === separator) {
-            row.push(col);
-            col = '';
-          } else if (char === '\n') {
-            row.push(col);
-            result.push(row);
-            row = [];
-            col = '';
-          } else if (char === '\r') {} else {
-            col += char;
-          }
-        }
-      }
-      if (col || row.length > 0) {
-        row.push(col);
-        result.push(row);
-      }
-      if (result.length < 2) return [];
-      const headers = result[0].map(h => h.trim());
-      const excelRows = result.slice(1).map(r => {
-        const obj = {};
-        for (let i = 0; i < headers.length; i++) {
-          obj[headers[i]] = r[i] !== undefined ? r[i].trim() : '';
-        }
-        return obj;
-      });
-      return await parseExcelRowsChunked(excelRows, fileObj, isStale);
+      return await streamCsvSalesRows(res, fileObj, isStale, rowFilter);
     } else {
       const arrayBuffer = await res.arrayBuffer();
       await yieldToBrowser();
@@ -9717,7 +9802,7 @@ async function fetchGithubSalesFile(fileObj, isStale) {
       await yieldToBrowser();
       const sheetName = workbook.SheetNames[0];
       const excelRows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-      return await parseExcelRowsChunked(excelRows, fileObj, isStale);
+      return await parseExcelRowsChunked(excelRows, fileObj, isStale, rowFilter);
     }
   } catch (e) {
     console.error(`Error procesando archivo ${fileObj.type}:`, e);
@@ -9938,9 +10023,10 @@ function App() {
   const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null, includePrevYear = true) => {
     const isStale = externalIsStale || (() => false);
     if (!appConfig || !currentUser) return;
+    const cacheKey = 'salesData_' + currentUser.id;
     let cachedSales = null;
     try {
-      cachedSales = await loadFromCache('salesData');
+      cachedSales = await loadFromCache(cacheKey);
     } catch (e) {
       console.warn(e);
     }
@@ -9977,18 +10063,19 @@ function App() {
     }
     if (!isStale()) setIsFetchingSales(true);
     try {
+      const rowFilter = buildVendorFilter(currentUser);
       const combinedSales = includePrevYear ? [] : (cachedSales || []).filter(s => s.source === 'prevYear');
       for (const fileObj of urls) {
         if (isStale()) return;
         await yieldToBrowser();
-        const part = await fetchGithubSalesFile(fileObj, isStale);
+        const part = await fetchGithubSalesFile(fileObj, isStale, rowFilter);
         for (let i = 0; i < part.length; i++) {
           combinedSales.push(part[i]);
         }
       }
       if (isStale()) return;
       startSalesTransition(() => setSalesData(combinedSales));
-      scheduleHeavyWrite(() => saveToCache('salesData', combinedSales));
+      scheduleHeavyWrite(() => saveToCache(cacheKey, combinedSales));
       const now = new Date();
       localStorage.setItem('lastGithubSyncTimestamp', now.getTime().toString());
       const vetOpts = {
@@ -10044,11 +10131,11 @@ function App() {
       const rows = await fetchGithubSalesFile({
         url: appConfig.githubSalesUrlPrevYear,
         type: 'prevYear'
-      }, () => false);
+      }, () => false, buildVendorFilter(currentUser));
       startSalesTransition(() => {
         setSalesData(prev => {
           const merged = [...prev.filter(s => s.source !== 'prevYear'), ...rows];
-          scheduleHeavyWrite(() => saveToCache('salesData', merged));
+          scheduleHeavyWrite(() => saveToCache('salesData_' + currentUser.id, merged));
           return merged;
         });
       });
