@@ -318,6 +318,21 @@ const rutasDeCxc = lista => {
   });
   return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
 };
+const clienteCoincide = (c, texto) => {
+  const q = (texto || '').trim().toLowerCase();
+  if (!q) return true;
+  if ((c.cliente || '').toLowerCase().includes(q)) return true;
+  const cod = String(c.idCliente || '');
+  if (cod.toLowerCase().includes(q)) return true;
+  const qId = normalizeId(q);
+  return !!qId && normalizeId(cod).includes(qId);
+};
+const deudaDePedido = (cxc, pedido) => {
+  if (!cxc || cxc.length === 0 || !pedido) return null;
+  return cxc.find(d => matchCxcConCliente(d, {
+    cliente: pedido.clienteNombre
+  }) || pedido.clienteId && normalizeId(d.idCliente) === normalizeId(pedido.clienteId)) || null;
+};
 const BANCOS = ['Banesco', 'Mercantil', 'BBVA Provincial', 'Banco de Venezuela', 'BNC — Banco Nacional de Crédito', 'Bancamiga', 'Banplus', 'Banco Exterior', 'Bancaribe', 'Banco del Tesoro', 'Banco Activo', 'Banco Caroní', 'Banco Plaza', 'Banco Sofitasa', 'BFC — Banco Fondo Común', '100% Banco', 'Zelle', 'Efectivo'];
 const PAGO_ESTADOS = {
   Pendiente: {
@@ -344,29 +359,52 @@ const pagoMontoUsd = (moneda, montoOriginal, tasa) => {
   const m = Number(montoOriginal) || 0;
   if (moneda !== 'VES') return m;
   const t = Number(tasa) || 0;
-  return t > 0 ? m / t : 0;
+  return t > 0 ? m / t : null;
 };
-const pagoTotalFacturas = facturas => (facturas || []).reduce((acc, f) => acc + (Number(f.monto) || 0), 0);
+const rutaDePago = p => {
+  const id = p && p.vendedorId ? String(p.vendedorId).trim() : '';
+  const nom = p && p.vendedorNombre ? String(p.vendedorNombre).trim() : '';
+  if (id && nom) return `${id} - ${nom}`;
+  return nom || id || 'Sin ruta';
+};
 const filasRelacionCobros = pagos => {
-  const out = [];
-  (pagos || []).forEach(p => {
-    const facturas = p.facturas && p.facturas.length > 0 ? p.facturas : [{
-      numero: '-',
-      monto: p.montoUsd
-    }];
-    facturas.forEach((f, i) => out.push({
+  return (pagos || []).map(p => {
+    const nums = (p.facturas || []).map(f => f.numero).filter(Boolean);
+    const esBs = p.moneda === 'VES';
+    return {
       codigo: p.clienteId || '-',
       cliente: p.clienteNombre || '-',
-      factura: f.numero,
-      banco: i === 0 ? p.banco || '-' : '',
-      referencia: i === 0 ? p.referencia || '-' : '',
-      monto: Number(f.monto) || 0,
+      facturas: nums.length > 0 ? nums : ['-'],
+      banco: p.banco || '-',
+      referencia: p.referencia || '-',
+      monto: p.montoUsd === null || p.montoUsd === undefined ? null : Number(p.montoUsd) || 0,
+      bs: esBs ? Number(p.montoOriginal) || 0 : null,
+      tasa: esBs ? Number(p.tasa) || 0 : null,
       fecha: p.fechaPago || '',
-      observacion: i === 0 ? p.observacion || '' : '',
-      vendedor: p.vendedorNombre || ''
-    }));
+      observacion: p.observacion || '',
+      vendedorId: p.vendedorId || '',
+      vendedor: p.vendedorNombre || '',
+      ruta: rutaDePago(p)
+    };
   });
-  return out;
+};
+const agruparPorRuta = filas => {
+  const mapa = new Map();
+  (filas || []).forEach(f => {
+    const clave = f.ruta || 'Sin ruta';
+    if (!mapa.has(clave)) mapa.set(clave, {
+      ruta: clave,
+      filas: [],
+      totalUsd: 0,
+      totalBs: 0,
+      sinTasa: 0
+    });
+    const g = mapa.get(clave);
+    g.filas.push(f);
+    if (f.monto === null) g.sinTasa++;else g.totalUsd += Number(f.monto) || 0;
+    g.totalBs += Number(f.bs) || 0;
+  });
+  return Array.from(mapa.values()).sort((a, b) => a.ruta.localeCompare(b.ruta));
 };
 const filtrarCxc = (lista, texto, ruta) => {
   const q = (texto || '').trim().toLowerCase();
@@ -646,12 +684,7 @@ const GestorPedidoModal = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [showFacturas, setShowFacturas] = useState(false);
-  const clientDebtData = useMemo(() => {
-    if (!cxc || cxc.length === 0) return null;
-    return cxc.find(d => matchCxcConCliente(d, {
-      cliente: pedido.clienteNombre
-    }) || pedido.clienteId && normalizeId(d.idCliente) === normalizeId(pedido.clienteId));
-  }, [cxc, pedido]);
+  const clientDebtData = useMemo(() => deudaDePedido(cxc, pedido), [cxc, pedido]);
   const handleListaChange = e => {
     const newLista = e.target.value;
     setSelectedLista(newLista);
@@ -1740,7 +1773,7 @@ const PagosVendedorView = ({
   const [montoOriginal, setMontoOriginal] = useState('');
   const [tasa, setTasa] = useState('');
   const [observacion, setObservacion] = useState('');
-  const [facturasSel, setFacturasSel] = useState({});
+  const [facturasSel, setFacturasSel] = useState([]);
   const [facturaManual, setFacturaManual] = useState('');
   const [histBusqueda, setHistBusqueda] = useState('');
   const [histEstado, setHistEstado] = useState('ALL');
@@ -1748,19 +1781,13 @@ const PagosVendedorView = ({
     const esMando = currentUser.rol === 'admin' || currentUser.rol === 'gerente';
     return esMando ? cartera : cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(currentUser.id) || (c.vendedorNombre || '').includes(currentUser.id));
   }, [cartera, currentUser]);
-  const clientesFiltrados = useMemo(() => {
-    const q = clienteBusqueda.trim().toLowerCase();
-    if (!q) return miCartera.slice(0, 30);
-    return miCartera.filter(c => (c.cliente || '').toLowerCase().includes(q)).slice(0, 30);
-  }, [miCartera, clienteBusqueda]);
+  const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, clienteBusqueda)).slice(0, 30), [miCartera, clienteBusqueda]);
   const facturasCliente = useMemo(() => {
     if (!clienteSel) return [];
     const d = cxc.find(x => matchCxcConCliente(x, clienteSel));
     return d && Array.isArray(d.facturas) ? d.facturas : [];
   }, [cxc, clienteSel]);
   const montoUsd = useMemo(() => pagoMontoUsd(moneda, montoOriginal, tasa), [moneda, montoOriginal, tasa]);
-  const asignado = useMemo(() => Object.values(facturasSel).reduce((a, v) => a + (Number(v) || 0), 0), [facturasSel]);
-  const diferencia = useMemo(() => Number((montoUsd - asignado).toFixed(2)), [montoUsd, asignado]);
   const limpiar = () => {
     setClienteSel(null);
     setClienteBusqueda('');
@@ -1771,35 +1798,16 @@ const PagosVendedorView = ({
     setMontoOriginal('');
     setTasa('');
     setObservacion('');
-    setFacturasSel({});
+    setFacturasSel([]);
     setFacturaManual('');
   };
-  const toggleFactura = (numero, saldoSugerido) => {
-    setFacturasSel(prev => {
-      const next = {
-        ...prev
-      };
-      if (numero in next) {
-        delete next[numero];
-        return next;
-      }
-      const libre = Math.max(0, Number((montoUsd - asignado).toFixed(2)));
-      next[numero] = Number(Math.min(saldoSugerido || libre, libre || saldoSugerido || 0).toFixed(2));
-      return next;
-    });
+  const toggleFactura = numero => {
+    setFacturasSel(prev => prev.includes(numero) ? prev.filter(n => n !== numero) : [...prev, numero]);
   };
   const agregarFacturaManual = () => {
     const num = facturaManual.trim();
     if (!num) return;
-    if (num in facturasSel) {
-      setFacturaManual('');
-      return;
-    }
-    const libre = Math.max(0, Number((montoUsd - asignado).toFixed(2)));
-    setFacturasSel(prev => ({
-      ...prev,
-      [num]: libre
-    }));
+    setFacturasSel(prev => prev.includes(num) ? prev : [...prev, num]);
     setFacturaManual('');
   };
   const validar = () => {
@@ -1808,13 +1816,7 @@ const PagosVendedorView = ({
     if (!referencia.trim()) return 'Escribe el número de referencia del pago.';
     if (!fechaPago) return 'Indica la fecha del pago.';
     if (!(Number(montoOriginal) > 0)) return 'El monto debe ser mayor a cero.';
-    if (moneda === 'VES' && !(Number(tasa) > 0)) return 'Indica la tasa del día para convertir los bolívares a dólares.';
-    const nums = Object.keys(facturasSel);
-    if (nums.length === 0) return 'Marca al menos una factura a la que se aplica el pago.';
-    if (nums.some(n => !(Number(facturasSel[n]) > 0))) return 'Cada factura seleccionada debe tener un monto mayor a cero.';
-    if (Math.abs(diferencia) > 0.01) {
-      return diferencia > 0 ? `Faltan $${money(diferencia)} por asignar a facturas.` : `Asignaste $${money(Math.abs(diferencia))} de más entre las facturas.`;
-    }
+    if (facturasSel.length === 0) return 'Marca al menos una factura o nota que afecta este pago.';
     return null;
   };
   const enviar = async () => {
@@ -1835,11 +1837,10 @@ const PagosVendedorView = ({
         fechaPago,
         moneda,
         montoOriginal: Number(montoOriginal),
-        tasa: moneda === 'VES' ? Number(tasa) : null,
-        montoUsd: Number(montoUsd.toFixed(2)),
-        facturas: Object.keys(facturasSel).map(n => ({
-          numero: n,
-          monto: Number(Number(facturasSel[n]).toFixed(2))
+        tasa: moneda === 'VES' && Number(tasa) > 0 ? Number(tasa) : null,
+        montoUsd: montoUsd === null ? null : Number(montoUsd.toFixed(2)),
+        facturas: facturasSel.map(n => ({
+          numero: n
         })),
         observacion: observacion.trim(),
         estado: 'Pendiente',
@@ -1912,7 +1913,7 @@ const PagosVendedorView = ({
   }, clienteSel.idCliente || 'Sin código')), React.createElement("button", {
     onClick: () => {
       setClienteSel(null);
-      setFacturasSel({});
+      setFacturasSel([]);
     },
     className: "shrink-0 text-blue-600 hover:text-white hover:bg-blue-600 rounded-lg p-2 transition-colors",
     title: "Cambiar cliente"
@@ -1925,7 +1926,7 @@ const PagosVendedorView = ({
     size: 16
   }), React.createElement("input", {
     type: "text",
-    placeholder: "Buscar cliente de tu ruta...",
+    placeholder: "Buscar por nombre o código...",
     value: clienteBusqueda,
     onChange: e => setClienteBusqueda(e.target.value),
     className: inputCls + ' pl-9'
@@ -1935,11 +1936,13 @@ const PagosVendedorView = ({
     key: i,
     onClick: () => {
       setClienteSel(c);
-      setFacturasSel({});
+      setFacturasSel([]);
     },
-    className: "w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors"
-  }, React.createElement("p", {
-    className: "text-sm font-bold text-slate-800 truncate"
+    className: "w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center gap-2.5"
+  }, React.createElement("span", {
+    className: "shrink-0 text-[11px] font-black font-mono text-blue-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5"
+  }, c.idCliente || 'S/N'), React.createElement("p", {
+    className: "text-sm font-bold text-slate-800 truncate min-w-0"
   }, c.cliente))), clientesFiltrados.length === 0 && React.createElement("p", {
     className: "px-4 py-6 text-center text-sm text-slate-400 font-medium"
   }, "Ningún cliente coincide.")))), React.createElement("div", {
@@ -1992,72 +1995,55 @@ const PagosVendedorView = ({
     className: inputCls
   })), moneda === 'VES' && React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Tasa del día (Bs por $)"), React.createElement("input", {
+  }, "Tasa del día ", React.createElement("span", {
+    className: "text-slate-400 font-bold normal-case"
+  }, "(opcional)")), React.createElement("input", {
     type: "number",
     min: "0",
     step: "0.01",
     inputMode: "decimal",
-    placeholder: "0.00",
+    placeholder: "Bs por $",
     value: tasa,
     onChange: e => setTasa(e.target.value),
     className: inputCls
   }))), moneda === 'VES' && Number(montoOriginal) > 0 && React.createElement("div", {
-    className: `rounded-xl px-4 py-3 text-sm font-bold ${montoUsd > 0 ? 'bg-blue-50 text-blue-800 border border-blue-100' : 'bg-yellow-50 text-yellow-800 border border-yellow-200'}`
-  }, montoUsd > 0 ? React.createElement(React.Fragment, null, "Bs ", money(montoOriginal), " equivalen a ", React.createElement("span", {
+    className: `rounded-xl px-4 py-3 text-sm font-bold ${montoUsd !== null ? 'bg-blue-50 text-blue-800 border border-blue-100' : 'bg-slate-50 text-slate-600 border border-slate-200'}`
+  }, montoUsd !== null ? React.createElement(React.Fragment, null, "Bs ", money(montoOriginal), " equivalen a ", React.createElement("span", {
     className: "font-black"
-  }, "$", money(montoUsd)), " a la tasa indicada.") : 'Falta la tasa del día para calcular el equivalente en dólares.'), React.createElement("div", null, React.createElement("label", {
+  }, "$", money(montoUsd)), " a la tasa indicada.") : React.createElement(React.Fragment, null, "Se reportará ", React.createElement("span", {
+    className: "font-black"
+  }, "Bs ", money(montoOriginal)), ". Sin tasa no se calcula el equivalente en dólares, pero el pago se registra igual.")), React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Facturas que cubre este pago"), !clienteSel ? React.createElement("p", {
+  }, "Facturas o notas que afecta este pago"), !clienteSel ? React.createElement("p", {
     className: "text-sm text-slate-400 font-medium bg-slate-50 rounded-xl px-4 py-6 text-center"
   }, "Selecciona primero un cliente.") : React.createElement(React.Fragment, null, React.createElement("div", {
     className: "border border-slate-100 rounded-xl divide-y divide-slate-50 overflow-hidden"
   }, facturasCliente.map((f, i) => {
-    const marcada = f.numero in facturasSel;
-    return React.createElement("div", {
+    const marcada = facturasSel.includes(f.numero);
+    return React.createElement("label", {
       key: i,
-      className: `flex items-center gap-3 px-4 py-3 transition-colors ${marcada ? 'bg-blue-50' : 'hover:bg-slate-50'}`
+      className: `flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${marcada ? 'bg-blue-50' : 'hover:bg-slate-50'}`
     }, React.createElement("input", {
       type: "checkbox",
       checked: marcada,
-      onChange: () => toggleFactura(f.numero, Number(f.saldo) || 0),
-      className: "w-4 h-4 accent-blue-600 cursor-pointer shrink-0"
+      onChange: () => toggleFactura(f.numero),
+      className: "w-5 h-5 accent-blue-600 cursor-pointer shrink-0"
     }), React.createElement("div", {
       className: "flex-1 min-w-0"
     }, React.createElement("p", {
       className: "text-sm font-bold text-slate-800 font-mono truncate"
     }, f.numero), React.createElement("p", {
       className: "text-[11px] text-slate-500 font-medium"
-    }, f.fecha, " · Saldo $", money(f.saldo))), marcada && React.createElement("div", {
-      className: "shrink-0 flex items-center gap-1"
-    }, React.createElement("span", {
-      className: "text-xs font-bold text-slate-400"
-    }, "$"), React.createElement("input", {
-      type: "number",
-      min: "0",
-      step: "0.01",
-      inputMode: "decimal",
-      value: facturasSel[f.numero],
-      onChange: e => setFacturasSel(prev => ({
-        ...prev,
-        [f.numero]: e.target.value
-      })),
-      onFocus: e => e.target.select(),
-      className: "w-24 text-right border-2 border-blue-200 rounded-lg px-2 py-1.5 text-sm font-black text-blue-900 outline-none focus:border-blue-500"
-    })));
+    }, safeFormatDate(f.fecha), " · Saldo $", money(f.saldo))));
   }), facturasCliente.length === 0 && React.createElement("p", {
     className: "px-4 py-6 text-center text-sm text-slate-400 font-medium"
-  }, "Este cliente no tiene facturas pendientes cargadas. Agrégala manualmente abajo."), Object.keys(facturasSel).filter(n => !facturasCliente.some(f => f.numero === n)).map(n => React.createElement("div", {
+  }, "Este cliente no tiene facturas pendientes cargadas. Agrégala manualmente abajo."), facturasSel.filter(n => !facturasCliente.some(f => f.numero === n)).map(n => React.createElement("div", {
     key: n,
     className: "flex items-center gap-3 px-4 py-3 bg-blue-50"
   }, React.createElement("button", {
-    onClick: () => setFacturasSel(prev => {
-      const x = {
-        ...prev
-      };
-      delete x[n];
-      return x;
-    }),
-    className: "text-red-500 hover:text-red-700 shrink-0"
+    onClick: () => toggleFactura(n),
+    className: "text-red-500 hover:text-red-700 shrink-0",
+    title: "Quitar"
   }, React.createElement(X, {
     size: 16
   })), React.createElement("div", {
@@ -2066,27 +2052,11 @@ const PagosVendedorView = ({
     className: "text-sm font-bold text-slate-800 font-mono truncate"
   }, n), React.createElement("p", {
     className: "text-[11px] text-slate-500 font-medium"
-  }, "Agregada manualmente")), React.createElement("div", {
-    className: "shrink-0 flex items-center gap-1"
-  }, React.createElement("span", {
-    className: "text-xs font-bold text-slate-400"
-  }, "$"), React.createElement("input", {
-    type: "number",
-    min: "0",
-    step: "0.01",
-    inputMode: "decimal",
-    value: facturasSel[n],
-    onChange: e => setFacturasSel(prev => ({
-      ...prev,
-      [n]: e.target.value
-    })),
-    onFocus: e => e.target.select(),
-    className: "w-24 text-right border-2 border-blue-200 rounded-lg px-2 py-1.5 text-sm font-black text-blue-900 outline-none focus:border-blue-500"
-  }))))), React.createElement("div", {
+  }, "Agregada manualmente"))))), React.createElement("div", {
     className: "flex gap-2 mt-2"
   }, React.createElement("input", {
     type: "text",
-    placeholder: "Agregar otra factura por número...",
+    placeholder: "Agregar otra factura o nota por número...",
     value: facturaManual,
     onChange: e => setFacturaManual(e.target.value),
     onKeyDown: e => {
@@ -2102,21 +2072,9 @@ const PagosVendedorView = ({
     className: "px-4 bg-slate-100 hover:bg-blue-600 hover:text-white disabled:opacity-40 disabled:hover:bg-slate-100 disabled:hover:text-slate-600 text-slate-600 font-bold rounded-xl transition-colors flex items-center gap-1 text-sm"
   }, React.createElement(Plus, {
     size: 16
-  }), " Agregar")), Number(montoOriginal) > 0 && React.createElement("div", {
-    className: `mt-3 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-2 ${Math.abs(diferencia) <= 0.01 ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`
-  }, React.createElement("div", {
-    className: "flex flex-wrap gap-x-6 gap-y-1 text-sm font-bold"
-  }, React.createElement("span", {
-    className: "text-slate-600"
-  }, "Pago: ", React.createElement("span", {
-    className: "font-black text-slate-800"
-  }, "$", money(montoUsd))), React.createElement("span", {
-    className: "text-slate-600"
-  }, "Asignado: ", React.createElement("span", {
-    className: "font-black text-slate-800"
-  }, "$", money(asignado)))), React.createElement("span", {
-    className: `text-sm font-black ${Math.abs(diferencia) <= 0.01 ? 'text-green-700' : 'text-yellow-800'}`
-  }, Math.abs(diferencia) <= 0.01 ? '✓ Cuadra' : diferencia > 0 ? `Faltan $${money(diferencia)}` : `Sobran $${money(Math.abs(diferencia))}`)))), React.createElement("div", null, React.createElement("label", {
+  }), " Agregar")), facturasSel.length > 0 && React.createElement("p", {
+    className: "mt-2 text-[11px] font-bold text-slate-500"
+  }, facturasSel.length, " documento", facturasSel.length === 1 ? '' : 's', " marcado", facturasSel.length === 1 ? '' : 's'))), React.createElement("div", null, React.createElement("label", {
     className: labelCls
   }, "Observación (opcional)"), React.createElement("textarea", {
     rows: "2",
@@ -2197,16 +2155,18 @@ const PagosVendedorView = ({
     className: "text-[11px] text-slate-500 font-medium mt-0.5"
   }, p.banco, " · Ref. ", p.referencia, " · ", safeFormatDate(p.fechaPago))), React.createElement("div", {
     className: "text-right shrink-0"
-  }, React.createElement("p", {
+  }, p.montoUsd === null || p.montoUsd === undefined ? React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "Bs ", money(p.montoOriginal)) : React.createElement("p", {
     className: "font-black text-blue-900 text-lg"
   }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
     className: "text-[10px] font-bold text-slate-400"
-  }, "Bs ", money(p.montoOriginal), " @ ", money(p.tasa)))), React.createElement("div", {
+  }, Number(p.tasa) > 0 ? `Bs ${money(p.montoOriginal)} @ ${money(p.tasa)}` : 'Sin tasa cargada'))), React.createElement("div", {
     className: "mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
   }, (p.facturas || []).map((f, i) => React.createElement("span", {
     key: i,
     className: "text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-mono"
-  }, f.numero, " · $", money(f.monto)))), p.observacion && React.createElement("p", {
+  }, f.numero))), p.observacion && React.createElement("p", {
     className: "mt-2 text-[11px] text-slate-500 font-medium italic"
   }, "\"", p.observacion, "\""), p.estado === 'Procesado' && p.fechaProceso && React.createElement("p", {
     className: "mt-2 text-[11px] font-bold text-green-700"
@@ -2249,7 +2209,7 @@ const PedidosVendedorDashboard = ({
   }, [cartera, currentUser]);
   const miCartera = useMemo(() => {
     let list = miCarteraBase;
-    if (searchCliente) list = list.filter(c => (c.cliente || '').toLowerCase().includes(searchCliente.toLowerCase()));
+    if (searchCliente) list = list.filter(c => clienteCoincide(c, searchCliente));
     return list.map(c => {
       const cxcMatch = cxc.find(d => matchCxcConCliente(d, c));
       return {
@@ -2327,7 +2287,7 @@ const PedidosVendedorDashboard = ({
     size: 18
   }), React.createElement("input", {
     type: "text",
-    placeholder: "Buscar cliente...",
+    placeholder: "Buscar por nombre o código...",
     value: searchCliente,
     onChange: e => setSearchCliente(e.target.value),
     className: "w-full md:w-64 pl-10 pr-4 py-2.5 bg-white/10 border border-white/20 focus:bg-white focus:text-slate-800 text-white placeholder-white/60 rounded-xl outline-none transition-all font-medium"
@@ -2565,7 +2525,10 @@ const RelacionCobrosPrint = ({
   titulo
 }) => {
   const filas = useMemo(() => filasRelacionCobros(pagos), [pagos]);
-  const total = filas.reduce((a, f) => a + f.monto, 0);
+  const grupos = useMemo(() => agruparPorRuta(filas), [filas]);
+  const total = filas.reduce((a, f) => a + (f.monto || 0), 0);
+  const totalBs = filas.reduce((a, f) => a + (f.bs || 0), 0);
+  const sinTasa = filas.filter(f => f.monto === null).length;
   const th = {
     border: '1px solid #000',
     padding: '6px 4px',
@@ -2625,7 +2588,7 @@ const RelacionCobrosPrint = ({
     style: {
       fontWeight: 700
     }
-  }, "Impreso: ", new Date().toLocaleDateString()), React.createElement("p", null, filas.length, " registro", filas.length === 1 ? '' : 's'))), React.createElement("div", {
+  }, "Impreso: ", new Date().toLocaleDateString()), React.createElement("p", null, filas.length, " pago", filas.length === 1 ? '' : 's'))), React.createElement("div", {
     style: {
       background: '#111',
       color: '#fff',
@@ -2693,7 +2656,29 @@ const RelacionCobrosPrint = ({
     style: th
   }, "Fecha"), React.createElement("th", {
     style: th
-  }, "Observacion"))), React.createElement("tbody", null, filas.map((f, i) => React.createElement("tr", {
+  }, "Observacion"))), React.createElement("tbody", null, grupos.map((g, gi) => React.createElement(React.Fragment, {
+    key: gi
+  }, React.createElement("tr", null, React.createElement("td", {
+    style: {
+      ...td,
+      background: '#334155',
+      color: '#fff',
+      fontWeight: 900,
+      fontSize: '9px',
+      letterSpacing: '0.04em'
+    },
+    colSpan: "6"
+  }, "RUTA: ", g.ruta), React.createElement("td", {
+    style: {
+      ...td,
+      background: '#334155',
+      color: '#fff',
+      fontWeight: 700,
+      fontSize: '8px',
+      textAlign: 'right'
+    },
+    colSpan: "2"
+  }, g.filas.length, " pago", g.filas.length === 1 ? '' : 's')), g.filas.map((f, i) => React.createElement("tr", {
     key: i
   }, React.createElement("td", {
     style: {
@@ -2710,7 +2695,12 @@ const RelacionCobrosPrint = ({
       ...td,
       fontFamily: 'monospace'
     }
-  }, f.factura), React.createElement("td", {
+  }, f.facturas.map((n, j) => React.createElement("div", {
+    key: j,
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, n))), React.createElement("td", {
     style: td
   }, f.banco), React.createElement("td", {
     style: {
@@ -2723,14 +2713,58 @@ const RelacionCobrosPrint = ({
       textAlign: 'right',
       fontWeight: 900
     }
-  }, money(f.monto)), React.createElement("td", {
+  }, f.bs !== null ? React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, "Bs ", money(f.bs)), React.createElement("div", {
+    style: {
+      fontWeight: 400,
+      fontSize: '7px',
+      color: '#475569',
+      whiteSpace: 'nowrap'
+    }
+  }, f.monto !== null ? `$${money(f.monto)} @ ${money(f.tasa)}` : 'sin tasa')) : `$${money(f.monto || 0)}`), React.createElement("td", {
     style: td
   }, f.fecha), React.createElement("td", {
     style: {
       ...td,
       fontSize: '8px'
     }
-  }, f.observacion))), filas.length === 0 && React.createElement("tr", null, React.createElement("td", {
+  }, f.observacion))), grupos.length > 1 && React.createElement("tr", null, React.createElement("td", {
+    style: {
+      ...td,
+      background: '#f1f5f9',
+      fontWeight: 700,
+      textAlign: 'right',
+      fontSize: '8px'
+    },
+    colSpan: "5"
+  }, "SUBTOTAL RUTA"), React.createElement("td", {
+    style: {
+      ...td,
+      background: '#f1f5f9',
+      fontWeight: 900,
+      textAlign: 'right'
+    }
+  }, g.totalBs > 0 && React.createElement("div", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, "Bs ", money(g.totalBs)), React.createElement("div", {
+    style: {
+      fontWeight: g.totalBs > 0 ? 400 : 900,
+      fontSize: g.totalBs > 0 ? '7px' : undefined,
+      color: g.totalBs > 0 ? '#475569' : undefined,
+      whiteSpace: 'nowrap'
+    }
+  }, "$", money(g.totalUsd), g.sinTasa > 0 ? ' *' : '')), React.createElement("td", {
+    style: {
+      ...td,
+      background: '#f1f5f9'
+    },
+    colSpan: "2"
+  })))), filas.length === 0 && React.createElement("tr", null, React.createElement("td", {
     style: {
       ...td,
       textAlign: 'center',
@@ -2745,20 +2779,38 @@ const RelacionCobrosPrint = ({
       textAlign: 'right'
     },
     colSpan: "5"
-  }, "TOTAL"), React.createElement("td", {
+  }, "TOTAL GENERAL"), React.createElement("td", {
     style: {
       ...td,
       background: '#e2e8f0',
       fontWeight: 900,
       textAlign: 'right'
     }
-  }, money(total)), React.createElement("td", {
+  }, totalBs > 0 && React.createElement("div", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, "Bs ", money(totalBs)), React.createElement("div", {
+    style: {
+      fontWeight: totalBs > 0 ? 400 : 900,
+      fontSize: totalBs > 0 ? '7px' : undefined,
+      color: totalBs > 0 ? '#475569' : undefined,
+      whiteSpace: 'nowrap'
+    }
+  }, "$", money(total))), React.createElement("td", {
     style: {
       ...td,
       background: '#e2e8f0'
     },
     colSpan: "2"
-  })))), React.createElement("div", {
+  })))), sinTasa > 0 && React.createElement("p", {
+    style: {
+      marginTop: '6px',
+      fontSize: '8px',
+      color: '#475569',
+      fontWeight: 700
+    }
+  }, "* ", sinTasa, " pago", sinTasa === 1 ? '' : 's', " en Bs sin tasa cargada: el total en dólares no ", sinTasa === 1 ? 'lo' : 'los', " incluye. El total en Bs sí está completo."), React.createElement("div", {
     style: {
       marginTop: '28px',
       display: 'flex',
@@ -2823,6 +2875,24 @@ const PagosAdminPanel = ({
       return (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.vendedorNombre || '').toLowerCase().includes(q) || String(p.clienteId || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q));
     }).sort((a, b) => safeGetTime(b.fechaReporte) - safeGetTime(a.fechaReporte));
   }, [pagos, busqueda, filtroEstado, filtroVendedor, desde, hasta]);
+  const gruposPantalla = useMemo(() => {
+    const mapa = new Map();
+    filtrados.forEach(p => {
+      const clave = rutaDePago(p);
+      if (!mapa.has(clave)) mapa.set(clave, {
+        ruta: clave,
+        pagos: [],
+        totalUsd: 0,
+        totalBs: 0,
+        sinTasa: 0
+      });
+      const g = mapa.get(clave);
+      g.pagos.push(p);
+      if (p.montoUsd === null || p.montoUsd === undefined) g.sinTasa++;else g.totalUsd += Number(p.montoUsd) || 0;
+      if (p.moneda === 'VES') g.totalBs += Number(p.montoOriginal) || 0;
+    });
+    return Array.from(mapa.values()).sort((a, b) => a.ruta.localeCompare(b.ruta));
+  }, [filtrados]);
   useEffect(() => {
     setSeleccionados(prev => prev.filter(id => filtrados.some(p => p.id === id)));
   }, [filtrados]);
@@ -3042,79 +3112,108 @@ const PagosAdminPanel = ({
   }, React.createElement(CheckCircle2, {
     size: 16
   }), " Marcar Procesados (", seleccionados.length, ")"))), React.createElement("div", {
-    className: "space-y-3"
-  }, filtrados.map(p => {
-    const marcado = seleccionados.includes(p.id);
-    const estado = p.estado || 'Pendiente';
+    className: "space-y-6"
+  }, gruposPantalla.map(g => {
+    const idsRuta = g.pagos.map(p => p.id);
+    const todosMarcados = idsRuta.every(id => seleccionados.includes(id));
     return React.createElement("div", {
-      key: p.id,
-      className: `bg-white rounded-2xl shadow-sm border-2 p-4 transition-colors ${marcado ? 'border-blue-400' : 'border-slate-100'}`
+      key: g.ruta,
+      className: "space-y-3"
     }, React.createElement("div", {
-      className: "flex items-start gap-3"
+      className: "bg-slate-800 text-white rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
+    }, React.createElement("label", {
+      className: "flex items-center gap-2.5 cursor-pointer min-w-0"
     }, React.createElement("input", {
       type: "checkbox",
-      checked: marcado,
-      onChange: e => setSeleccionados(prev => e.target.checked ? [...prev, p.id] : prev.filter(x => x !== p.id)),
-      className: "w-4 h-4 accent-blue-600 cursor-pointer mt-1 shrink-0"
-    }), React.createElement("div", {
-      className: "flex-1 min-w-0"
-    }, React.createElement("div", {
-      className: "flex flex-wrap justify-between items-start gap-3"
-    }, React.createElement("div", {
-      className: "min-w-0 flex-1"
-    }, React.createElement("div", {
-      className: "flex items-center gap-2 flex-wrap mb-1"
-    }, React.createElement(PagoEstadoChip, {
-      estado: estado
+      checked: todosMarcados,
+      onChange: e => setSeleccionados(prev => e.target.checked ? [...new Set([...prev, ...idsRuta])] : prev.filter(id => !idsRuta.includes(id))),
+      className: "w-4 h-4 accent-orange-500 cursor-pointer shrink-0"
     }), React.createElement("span", {
-      className: "text-[11px] font-bold text-slate-500"
-    }, p.vendedorNombre)), React.createElement("h4", {
-      className: "font-black text-slate-800 text-sm truncate"
-    }, React.createElement("span", {
-      className: "font-mono text-slate-400 mr-1"
-    }, p.clienteId), p.clienteNombre), React.createElement("p", {
-      className: "text-[11px] text-slate-500 font-medium mt-0.5"
-    }, p.banco, " · Ref. ", p.referencia, " · Pagado ", safeFormatDate(p.fechaPago))), React.createElement("div", {
+      className: "font-black text-sm truncate"
+    }, "RUTA: ", g.ruta)), React.createElement("div", {
       className: "text-right shrink-0"
-    }, React.createElement("p", {
-      className: "font-black text-blue-900 text-lg"
-    }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
-      className: "text-[10px] font-bold text-slate-400"
-    }, "Bs ", money(p.montoOriginal), " @ ", money(p.tasa)))), React.createElement("div", {
-      className: "mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
-    }, (p.facturas || []).map((f, i) => React.createElement("span", {
-      key: i,
-      className: "text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-mono"
-    }, f.numero, " · $", money(f.monto)))), p.observacion && React.createElement("p", {
-      className: "mt-2 text-[11px] text-slate-500 font-medium italic"
-    }, "\"", p.observacion, "\""), estado === 'Rechazado' && React.createElement("p", {
-      className: "mt-2 text-[11px] font-bold text-red-700"
-    }, "Rechazado: ", p.motivoRechazo), estado === 'Procesado' && p.fechaProceso && React.createElement("p", {
-      className: "mt-2 text-[11px] font-bold text-green-700"
-    }, "Procesado el ", safeFormatDate(p.fechaProceso), p.procesadoPorNombre ? ` por ${p.procesadoPorNombre}` : ''), React.createElement("div", {
-      className: "mt-3 flex flex-wrap gap-2"
-    }, estado !== 'Procesado' && React.createElement("button", {
-      onClick: () => marcarProcesados([p.id]),
-      disabled: isSaving,
-      className: "text-xs font-bold bg-green-50 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
-    }, React.createElement(CheckCircle2, {
-      size: 14
-    }), " Procesar"), estado !== 'Rechazado' && React.createElement("button", {
-      onClick: () => {
-        setRechazando(p);
-        setMotivoRechazo('');
-      },
-      disabled: isSaving,
-      className: "text-xs font-bold bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
-    }, React.createElement(X, {
-      size: 14
-    }), " Rechazar"), estado !== 'Pendiente' && React.createElement("button", {
-      onClick: () => revertirAPendiente(p.id),
-      disabled: isSaving,
-      className: "text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-700 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
-    }, React.createElement(RefreshCw, {
-      size: 14
-    }), " Volver a pendiente")))));
+    }, React.createElement("span", {
+      className: "text-[11px] font-bold text-slate-300"
+    }, g.pagos.length, " pago", g.pagos.length === 1 ? '' : 's', " · "), React.createElement("span", {
+      className: "text-sm font-black"
+    }, "$", money(g.totalUsd)), g.totalBs > 0 && React.createElement("span", {
+      className: "text-[11px] font-bold text-slate-300"
+    }, " · Bs ", money(g.totalBs)), g.sinTasa > 0 && React.createElement("span", {
+      className: "text-[10px] font-bold text-yellow-300 block",
+      title: "Estos pagos no suman al total en dólares"
+    }, g.sinTasa, " sin tasa"))), g.pagos.map(p => {
+      const marcado = seleccionados.includes(p.id);
+      const estado = p.estado || 'Pendiente';
+      return React.createElement("div", {
+        key: p.id,
+        className: `bg-white rounded-2xl shadow-sm border-2 p-4 transition-colors ${marcado ? 'border-blue-400' : 'border-slate-100'}`
+      }, React.createElement("div", {
+        className: "flex items-start gap-3"
+      }, React.createElement("input", {
+        type: "checkbox",
+        checked: marcado,
+        onChange: e => setSeleccionados(prev => e.target.checked ? [...prev, p.id] : prev.filter(x => x !== p.id)),
+        className: "w-4 h-4 accent-blue-600 cursor-pointer mt-1 shrink-0"
+      }), React.createElement("div", {
+        className: "flex-1 min-w-0"
+      }, React.createElement("div", {
+        className: "flex flex-wrap justify-between items-start gap-3"
+      }, React.createElement("div", {
+        className: "min-w-0 flex-1"
+      }, React.createElement("div", {
+        className: "flex items-center gap-2 flex-wrap mb-1"
+      }, React.createElement(PagoEstadoChip, {
+        estado: estado
+      }), React.createElement("span", {
+        className: "text-[11px] font-bold text-slate-500"
+      }, p.vendedorNombre)), React.createElement("h4", {
+        className: "font-black text-slate-800 text-sm truncate"
+      }, React.createElement("span", {
+        className: "font-mono text-slate-400 mr-1"
+      }, p.clienteId), p.clienteNombre), React.createElement("p", {
+        className: "text-[11px] text-slate-500 font-medium mt-0.5"
+      }, p.banco, " · Ref. ", p.referencia, " · Pagado ", safeFormatDate(p.fechaPago))), React.createElement("div", {
+        className: "text-right shrink-0"
+      }, React.createElement("p", {
+        className: "font-black text-blue-900 text-lg"
+      }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
+        className: "text-[10px] font-bold text-slate-400"
+      }, "Bs ", money(p.montoOriginal), " @ ", money(p.tasa)))), React.createElement("div", {
+        className: "mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
+      }, (p.facturas || []).map((f, i) => React.createElement("span", {
+        key: i,
+        className: "text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-mono"
+      }, f.numero))), p.observacion && React.createElement("p", {
+        className: "mt-2 text-[11px] text-slate-500 font-medium italic"
+      }, "\"", p.observacion, "\""), estado === 'Rechazado' && React.createElement("p", {
+        className: "mt-2 text-[11px] font-bold text-red-700"
+      }, "Rechazado: ", p.motivoRechazo), estado === 'Procesado' && p.fechaProceso && React.createElement("p", {
+        className: "mt-2 text-[11px] font-bold text-green-700"
+      }, "Procesado el ", safeFormatDate(p.fechaProceso), p.procesadoPorNombre ? ` por ${p.procesadoPorNombre}` : ''), React.createElement("div", {
+        className: "mt-3 flex flex-wrap gap-2"
+      }, estado !== 'Procesado' && React.createElement("button", {
+        onClick: () => marcarProcesados([p.id]),
+        disabled: isSaving,
+        className: "text-xs font-bold bg-green-50 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+      }, React.createElement(CheckCircle2, {
+        size: 14
+      }), " Procesar"), estado !== 'Rechazado' && React.createElement("button", {
+        onClick: () => {
+          setRechazando(p);
+          setMotivoRechazo('');
+        },
+        disabled: isSaving,
+        className: "text-xs font-bold bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+      }, React.createElement(X, {
+        size: 14
+      }), " Rechazar"), estado !== 'Pendiente' && React.createElement("button", {
+        onClick: () => revertirAPendiente(p.id),
+        disabled: isSaving,
+        className: "text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-700 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+      }, React.createElement(RefreshCw, {
+        size: 14
+      }), " Volver a pendiente")))));
+    }));
   }), filtrados.length === 0 && React.createElement("div", {
     className: "bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400"
   }, React.createElement(Wallet, {
@@ -3130,7 +3229,7 @@ const PagosAdminPanel = ({
     className: "font-black text-lg text-slate-800 mb-1"
   }, "Rechazar pago"), React.createElement("p", {
     className: "text-sm text-slate-500 font-medium mb-4"
-  }, rechazando.clienteNombre, " · $", money(rechazando.montoUsd), " · Ref. ", rechazando.referencia), React.createElement("label", {
+  }, rechazando.clienteNombre, " · ", rechazando.montoUsd === null || rechazando.montoUsd === undefined ? `Bs ${money(rechazando.montoOriginal)}` : `$${money(rechazando.montoUsd)}`, " · Ref. ", rechazando.referencia), React.createElement("label", {
     className: "text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5 block"
   }, "Motivo (lo verá el vendedor)"), React.createElement("textarea", {
     rows: "3",
@@ -3279,7 +3378,8 @@ const PedidosAdminPanel = ({
   const carteraInputRef = useRef(null);
   const listasDisponibles = useMemo(() => [...new Set(precios.map(p => p.lista).filter(Boolean))], [precios]);
   useEffect(() => {
-    if (!adminPreviewLista && listasDisponibles.length > 0) setAdminPreviewLista(listasDisponibles[0]);
+    const vigente = adminPreviewLista && listasDisponibles.includes(adminPreviewLista);
+    if (!vigente) setAdminPreviewLista(listasDisponibles.length > 0 ? listasDisponibles[0] : '');
   }, [listasDisponibles, adminPreviewLista]);
   const catalogWithAdminPrices = useMemo(() => {
     return catalog.map(prod => {
@@ -4005,10 +4105,30 @@ const PedidosAdminPanel = ({
         colSpan: 2
       }, "DEUDA:"), React.createElement("td", {
         style: {
-          padding: '2px 3px'
+          padding: '2px 3px',
+          textAlign: 'right',
+          fontWeight: 900
         },
         colSpan: 3
-      })), React.createElement("tr", null, React.createElement("td", {
+      }, (() => {
+        const d = deudaDePedido(cxc, pedido);
+        const monto = d ? Number(d.deuda) || 0 : 0;
+        if (monto <= 0) return React.createElement("span", {
+          style: {
+            fontWeight: 400,
+            color: '#94a3b8',
+            fontSize: '8px'
+          }
+        }, "SIN DEUDA");
+        const docs = (d.facturas || []).length;
+        return React.createElement(React.Fragment, null, `$${money(monto)}`, docs > 0 && React.createElement("span", {
+          style: {
+            fontWeight: 400,
+            fontSize: '7px',
+            color: '#475569'
+          }
+        }, ` (${docs} fact.)`));
+      })())), React.createElement("tr", null, React.createElement("td", {
         style: {
           borderRight: '1px solid #64748b',
           padding: '2px 3px',
@@ -4364,7 +4484,37 @@ const PedidosAdminPanel = ({
     className: "text-green-600 hover:text-green-800 text-xs font-bold flex items-center justify-center gap-1 mt-3 transition-colors"
   }, React.createElement(Download, {
     size: 14
-  }), " Descargar Plantilla")))), React.createElement("div", {
+  }), " Descargar Plantilla")))), listasDisponibles.length > 0 && React.createElement("div", {
+    className: "mt-8 border-t border-slate-100 pt-6"
+  }, React.createElement("h3", {
+    className: "font-bold text-slate-700 mb-1"
+  }, "Listas de Precios Cargadas"), React.createElement("p", {
+    className: "text-[11px] text-slate-500 font-medium mb-4"
+  }, "Eliminar una lista borra solo sus precios. Los productos del catálogo no se tocan."), React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"
+  }, listasDisponibles.map(l => {
+    const cantidad = precios.filter(p => p.lista === l).length;
+    const usuariosBase = (users || []).filter(u => u.listaBase === l);
+    const usuariosVen = (users || []).filter(u => Array.isArray(u.listasVisibles) && u.listasVisibles.includes(l));
+    return React.createElement("div", {
+      key: l,
+      className: "bg-slate-50 border-2 border-slate-200 rounded-2xl p-4 flex flex-col gap-3"
+    }, React.createElement("div", {
+      className: "min-w-0"
+    }, React.createElement("p", {
+      className: "font-black text-blue-900 text-sm truncate",
+      title: l
+    }, l), React.createElement("p", {
+      className: "text-[11px] font-bold text-slate-500 mt-0.5"
+    }, cantidad, " producto", cantidad === 1 ? '' : 's', " con precio"), (usuariosBase.length > 0 || usuariosVen.length > 0) && React.createElement("p", {
+      className: "text-[10px] font-bold text-orange-600 mt-1"
+    }, usuariosBase.length > 0 && `${usuariosBase.length} usuario${usuariosBase.length === 1 ? '' : 's'} la tiene${usuariosBase.length === 1 ? '' : 'n'} como lista base`, usuariosBase.length > 0 && usuariosVen.length > 0 && ' · ', usuariosVen.length > 0 && `${usuariosVen.length} la puede${usuariosVen.length === 1 ? '' : 'n'} ver`)), React.createElement("button", {
+      onClick: () => openModal('deleteListaPrecios', l, `Eliminar la lista "${l}"`, `Se borrarán los precios de ${cantidad} producto${cantidad === 1 ? '' : 's'} de la lista "${l}". Los productos del catálogo NO se eliminan.` + (usuariosBase.length > 0 ? ` ATENCIÓN: ${usuariosBase.length} usuario${usuariosBase.length === 1 ? '' : 's'} la tiene${usuariosBase.length === 1 ? '' : 'n'} como lista base y pasará${usuariosBase.length === 1 ? '' : 'n'} a usar otra lista automáticamente.` : '') + ' Esta acción no se puede deshacer.'),
+      className: "w-full py-2 bg-white border-2 border-red-200 text-red-600 hover:bg-red-600 hover:text-white hover:border-red-600 font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+    }, React.createElement(Trash2, {
+      size: 14
+    }), " Eliminar lista"));
+  }))), React.createElement("div", {
     className: "flex justify-between items-end mb-4 px-2 mt-8 border-t border-slate-100 pt-6"
   }, React.createElement("h3", {
     className: "font-bold text-slate-700"
@@ -11201,6 +11351,13 @@ function App() {
           });
           return batch.commit();
         }));
+      } else if (type === 'deleteListaPrecios') {
+        const aBorrar = preciosData.filter(p => p.lista === payload && p.id);
+        for (const chunk of chunkArray(aBorrar, 450)) {
+          const batch = writeBatch(db);
+          chunk.forEach(p => batch.delete(doc(db, getCollectionPath('precios'), p.id)));
+          await batch.commit();
+        }
       } else if (type === 'deleteClienteCartera') await deleteDoc(doc(db, getCollectionPath('cartera'), payload));else if (type === 'deleteMetaRow') {
         const userDoc = doc(db, getCollectionPath('users'), payload);
         await updateDoc(userDoc, {
