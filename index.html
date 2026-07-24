@@ -260,6 +260,29 @@ const initialUsersDB = [{
   password: "123"
 }];
 const normalizeHeader = key => String(key).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+const partirVendedor = valor => {
+  const txt = String(valor === undefined || valor === null ? '' : valor).replace(/\u00a0/g, ' ').trim();
+  if (!txt) return {
+    id: '',
+    nombre: ''
+  };
+  const conCodigo = txt.match(/^(\d+)\s*[-\u2010-\u2015:/|.,]?\s*(.*)$/);
+  if (conCodigo) {
+    const id = conCodigo[1];
+    const nombre = (conCodigo[2] || '').trim();
+    return {
+      id,
+      nombre: nombre || id
+    };
+  }
+  const partes = txt.split(/[-\u2010-\u2015]/);
+  const id = partes[0].trim();
+  const nombre = partes.slice(1).join('-').trim() || txt;
+  return {
+    id,
+    nombre
+  };
+};
 const getSafeVal = (row, possibleKeys) => {
   const rowKeys = Object.keys(row);
   for (let pk of possibleKeys) {
@@ -290,15 +313,102 @@ const safeGetTime = dateStr => {
 const chunkArray = (arr, size) => Array.from({
   length: Math.ceil(arr.length / size)
 }, (v, i) => arr.slice(i * size, i * size + size));
+const indexarPrecios = precios => {
+  const porSku = new Map();
+  const primeroPorSku = new Map();
+  (precios || []).forEach(p => {
+    if (!p || !p.sku) return;
+    if (!porSku.has(p.sku)) porSku.set(p.sku, new Map());
+    const listas = porSku.get(p.sku);
+    const lista = p.lista || '';
+    if (!listas.has(lista)) listas.set(lista, p);
+    if (!primeroPorSku.has(p.sku)) primeroPorSku.set(p.sku, p);
+  });
+  return {
+    deLista: (sku, lista) => {
+      const listas = porSku.get(sku);
+      return listas ? listas.get(lista || '') || null : null;
+    },
+    cualquiera: sku => primeroPorSku.get(sku) || null
+  };
+};
 const matchCxcConCliente = (d, c) => {
   if (!d || !c || !c.cliente) return false;
   return d.rawCliente === c.cliente || d.clienteNombre === c.cliente || d.idCliente && c.cliente.includes(d.idCliente) || d.rawCliente && d.rawCliente.includes(c.cliente);
 };
+const crearBuscadorDeuda = cxc => {
+  const porCodigo = new Map();
+  const porNombre = new Map();
+  const agregar = (mapa, clave, d) => {
+    if (!mapa.has(clave)) {
+      mapa.set(clave, {
+        idCliente: d.idCliente,
+        clienteNombre: d.clienteNombre,
+        deuda: 0,
+        facturas: [],
+        vistas: new Set()
+      });
+    }
+    const g = mapa.get(clave);
+    g.deuda += Number(d.deuda) || 0;
+    (d.facturas || []).forEach(f => {
+      const k = String(f.numero || '').trim();
+      if (k && g.vistas.has(k)) return;
+      if (k) g.vistas.add(k);
+      g.facturas.push(f);
+    });
+  };
+  (cxc || []).forEach(d => {
+    const cod = normalizeId(d.idCliente);
+    if (cod) agregar(porCodigo, cod, d);else if (d.clienteNombre || d.rawCliente) agregar(porNombre, d.clienteNombre || d.rawCliente, d);
+  });
+  return cliente => {
+    if (!cliente) return null;
+    const cod = normalizeId(cliente.idCliente);
+    if (cod && porCodigo.has(cod)) return porCodigo.get(cod);
+    if (cliente.cliente && porNombre.has(cliente.cliente)) return porNombre.get(cliente.cliente);
+    for (const g of porNombre.values()) {
+      if (matchCxcConCliente({
+        idCliente: g.idCliente,
+        clienteNombre: g.clienteNombre,
+        rawCliente: (g.idCliente || '') + '-' + (g.clienteNombre || '')
+      }, cliente)) return g;
+    }
+    return null;
+  };
+};
+const crearBuscadorCartera = cartera => {
+  const lista = Array.isArray(cartera) ? cartera : [];
+  const porCodigo = new Map();
+  const porNombre = new Map();
+  lista.forEach(c => {
+    const cod = normalizeId(c.idCliente);
+    if (cod && !porCodigo.has(cod)) porCodigo.set(cod, c);
+    if (c.cliente && !porNombre.has(c.cliente)) porNombre.set(c.cliente, c);
+  });
+  return d => {
+    if (!d) return null;
+    const cod = normalizeId(d.idCliente);
+    if (cod) {
+      const c = porCodigo.get(cod);
+      if (c) return c;
+    }
+    if (d.rawCliente) {
+      const c = porNombre.get(d.rawCliente);
+      if (c) return c;
+    }
+    if (d.clienteNombre) {
+      const c = porNombre.get(d.clienteNombre);
+      if (c) return c;
+    }
+    return lista.find(c => matchCxcConCliente(d, c)) || null;
+  };
+};
 const adjuntarRutaCxc = (cxc, cartera) => {
   if (!Array.isArray(cxc)) return [];
-  const lista = Array.isArray(cartera) ? cartera : [];
+  const buscar = crearBuscadorCartera(cartera);
   return cxc.map(d => {
-    const c = lista.find(cl => matchCxcConCliente(d, cl));
+    const c = buscar(d);
     return {
       ...d,
       idVendedor: c ? c.idVendedor : null,
@@ -410,7 +520,9 @@ const filtrarCxc = (lista, texto, ruta) => {
   const q = (texto || '').trim().toLowerCase();
   if (!q && (!ruta || ruta === 'ALL')) return lista || [];
   return (lista || []).filter(d => {
-    if (ruta && ruta !== 'ALL' && normalizeId(d.idVendedor) !== ruta) return false;
+    if (ruta === 'SIN_RUTA') {
+      if (d.idVendedor) return false;
+    } else if (ruta && ruta !== 'ALL' && normalizeId(d.idVendedor) !== ruta) return false;
     if (!q) return true;
     return (d.clienteNombre || '').toLowerCase().includes(q) || (d.rawCliente || '').toLowerCase().includes(q) || String(d.idCliente || '').toLowerCase().includes(q);
   });
@@ -458,7 +570,7 @@ const ConfirmModal = ({
   })), React.createElement("h3", {
     className: "text-xl font-black text-slate-800"
   }, title)), React.createElement("p", {
-    className: "text-slate-600 font-medium leading-relaxed"
+    className: "text-slate-600 font-medium leading-relaxed whitespace-pre-line"
   }, message)), React.createElement("div", {
     className: "p-5 bg-slate-50 flex justify-end gap-3 border-t border-slate-200"
   }, !isAlert && React.createElement("button", {
@@ -1080,10 +1192,11 @@ const TomaPedidosView = ({
       return prev;
     });
   };
+  const idxPrecios = useMemo(() => indexarPrecios(precios), [precios]);
   const catalogWithSelectedPrices = useMemo(() => {
     return catalog.map(prod => {
       const assignedList = itemLists[prod.sku] || listaBaseDefault;
-      const priceItem = precios.find(p => p.sku === prod.sku && p.lista === assignedList);
+      const priceItem = idxPrecios.deLista(prod.sku, assignedList);
       return {
         ...prod,
         listaAplicada: assignedList,
@@ -1093,7 +1206,7 @@ const TomaPedidosView = ({
         und: priceItem ? priceItem.und : 0
       };
     });
-  }, [catalog, precios, itemLists, listasDisponibles]);
+  }, [catalog, idxPrecios, itemLists, listaBaseDefault]);
   const marcas = useMemo(() => {
     const m = new Set(catalogWithSelectedPrices.map(p => p.marca));
     return ['Todas', ...Array.from(m).sort()];
@@ -1705,7 +1818,8 @@ const CxcFiltros = ({
   setRuta,
   rutas,
   total,
-  mostrados
+  mostrados,
+  haySinRuta = 0
 }) => {
   const hayFiltro = texto && texto.trim() !== '' || ruta && ruta !== 'ALL';
   return React.createElement("div", {
@@ -1721,7 +1835,7 @@ const CxcFiltros = ({
     value: texto,
     onChange: e => setTexto(e.target.value),
     className: "w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition-all font-medium"
-  })), rutas.length > 1 && React.createElement("select", {
+  })), (rutas.length > 1 || haySinRuta > 0) && React.createElement("select", {
     value: ruta,
     onChange: e => setRuta(e.target.value),
     className: "bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-2 py-2 outline-none cursor-pointer max-w-[220px]"
@@ -1730,7 +1844,9 @@ const CxcFiltros = ({
   }, "Todas las Rutas"), rutas.map(r => React.createElement("option", {
     key: r.id,
     value: r.id
-  }, r.label))), hayFiltro && React.createElement("button", {
+  }, r.label)), haySinRuta > 0 && React.createElement("option", {
+    value: "SIN_RUTA"
+  }, "⚠ Sin ruta asignada (", haySinRuta, ")")), hayFiltro && React.createElement("button", {
     onClick: () => {
       setTexto('');
       setRuta('ALL');
@@ -1782,11 +1898,9 @@ const PagosVendedorView = ({
     return esMando ? cartera : cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(currentUser.id) || (c.vendedorNombre || '').includes(currentUser.id));
   }, [cartera, currentUser]);
   const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, clienteBusqueda)).slice(0, 30), [miCartera, clienteBusqueda]);
-  const facturasCliente = useMemo(() => {
-    if (!clienteSel) return [];
-    const d = cxc.find(x => matchCxcConCliente(x, clienteSel));
-    return d && Array.isArray(d.facturas) ? d.facturas : [];
-  }, [cxc, clienteSel]);
+  const buscarDeuda = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
+  const clienteDeuda = useMemo(() => buscarDeuda(clienteSel), [buscarDeuda, clienteSel]);
+  const facturasCliente = clienteDeuda && clienteDeuda.facturas || [];
   const montoUsd = useMemo(() => pagoMontoUsd(moneda, montoOriginal, tasa), [moneda, montoOriginal, tasa]);
   const limpiar = () => {
     setClienteSel(null);
@@ -2207,22 +2321,24 @@ const PedidosVendedorDashboard = ({
   const miCarteraBase = useMemo(() => {
     return currentUser.rol === 'admin' || currentUser.rol === 'gerente' ? cartera : cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(currentUser.id) || (c.vendedorNombre || '').includes(currentUser.id));
   }, [cartera, currentUser]);
+  const buscarDeuda = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
+  const buscarEnMiCartera = useMemo(() => crearBuscadorCartera(miCarteraBase), [miCarteraBase]);
   const miCartera = useMemo(() => {
     let list = miCarteraBase;
     if (searchCliente) list = list.filter(c => clienteCoincide(c, searchCliente));
     return list.map(c => {
-      const cxcMatch = cxc.find(d => matchCxcConCliente(d, c));
+      const cxcMatch = buscarDeuda(c);
       return {
         ...c,
         idCliente: c.idCliente || (cxcMatch ? cxcMatch.idCliente : 'S/N'),
         deuda: cxcMatch ? cxcMatch.deuda : 0
       };
     });
-  }, [miCarteraBase, searchCliente, cxc]);
+  }, [miCarteraBase, searchCliente, buscarDeuda]);
   const miCxcDetallado = useMemo(() => {
-    const propios = cxc.filter(d => miCarteraBase.some(c => matchCxcConCliente(d, c)));
+    const propios = cxc.filter(d => buscarEnMiCartera(d) !== null);
     return adjuntarRutaCxc(propios, miCarteraBase);
-  }, [cxc, miCarteraBase]);
+  }, [cxc, miCarteraBase, buscarEnMiCartera]);
   const misRutasCxc = useMemo(() => rutasDeCxc(miCxcDetallado), [miCxcDetallado]);
   const miCxcFiltrado = useMemo(() => filtrarCxc(miCxcDetallado, cxcSearch, cxcRuta), [miCxcDetallado, cxcSearch, cxcRuta]);
   const misPedidos = useMemo(() => {
@@ -3325,6 +3441,7 @@ const PedidosAdminPanel = ({
   const [cxcRuta, setCxcRuta] = useState('ALL');
   const cxcConRuta = useMemo(() => adjuntarRutaCxc(cxc, cartera), [cxc, cartera]);
   const cxcRutasAdmin = useMemo(() => rutasDeCxc(cxcConRuta), [cxcConRuta]);
+  const cxcSinRuta = useMemo(() => cxcConRuta.filter(d => !d.idVendedor).length, [cxcConRuta]);
   const cxcFiltradoAdmin = useMemo(() => filtrarCxc(cxcConRuta, cxcSearch, cxcRuta), [cxcConRuta, cxcSearch, cxcRuta]);
   const [searchPedidoAdmin, setSearchPedidoAdmin] = useState('');
   const [pedidoStartDateAdmin, setPedidoStartDateAdmin] = useState('');
@@ -3381,9 +3498,17 @@ const PedidosAdminPanel = ({
     const vigente = adminPreviewLista && listasDisponibles.includes(adminPreviewLista);
     if (!vigente) setAdminPreviewLista(listasDisponibles.length > 0 ? listasDisponibles[0] : '');
   }, [listasDisponibles, adminPreviewLista]);
+  const idxPreciosAdmin = useMemo(() => indexarPrecios(precios), [precios]);
+  const conteoPorLista = useMemo(() => {
+    const acc = {};
+    (precios || []).forEach(p => {
+      if (p.lista) acc[p.lista] = (acc[p.lista] || 0) + 1;
+    });
+    return acc;
+  }, [precios]);
   const catalogWithAdminPrices = useMemo(() => {
     return catalog.map(prod => {
-      const priceItem = precios.find(p => p.sku === prod.sku && p.lista === adminPreviewLista);
+      const priceItem = idxPreciosAdmin.deLista(prod.sku, adminPreviewLista);
       return {
         ...prod,
         precio: priceItem ? priceItem.precio : 0,
@@ -3392,7 +3517,7 @@ const PedidosAdminPanel = ({
         und: priceItem ? priceItem.und : 0
       };
     });
-  }, [catalog, precios, adminPreviewLista]);
+  }, [catalog, idxPreciosAdmin, adminPreviewLista]);
   const [userForm, setUserForm] = useState({
     nombre: "",
     idPersonal: "",
@@ -3515,9 +3640,10 @@ const PedidosAdminPanel = ({
         const monto = parseNum(getSafeVal(row, ['Monto', 'Original', 'Total']));
         const saldo = parseNum(getSafeVal(row, ['Saldo', 'Deuda', 'Pendiente']));
         if (!idC || saldo <= 0) return;
-        if (!clientsMap[idC]) {
-          clientsMap[idC] = {
-            id: `cxc_${index}_${normalizeId(idC)}`,
+        const key = normalizeId(idC) || idC;
+        if (!clientsMap[key]) {
+          clientsMap[key] = {
+            id: `cxc_${index}_${key}`,
             rawCliente: `${idC}-${nomC}`,
             idCliente: idC,
             clienteNombre: nomC,
@@ -3525,8 +3651,8 @@ const PedidosAdminPanel = ({
             facturas: []
           };
         }
-        clientsMap[idC].deuda += saldo;
-        clientsMap[idC].facturas.push({
+        clientsMap[key].deuda += saldo;
+        clientsMap[key].facturas.push({
           numero,
           fecha,
           monto,
@@ -3546,13 +3672,18 @@ const PedidosAdminPanel = ({
       await uploadInBatches(newCxc, 'cxc', 'id');
       return `Se cargaron las deudas CXC de ${newCxc.length} clientes.`;
     } else if (type === 'cartera') {
+      const omitidas = {
+        sinVendedor: 0,
+        sinCliente: 0
+      };
+      const ejemplosSinVendedor = [];
       const newCartera = rows.map(row => {
-        const vVal = getSafeVal(row, ['VENDEDOR', 'VENDEDORES', 'ID VENDEDOR', 'RUTA']);
+        const vVal = getSafeVal(row, ['VENDEDOR', 'VENDEDORES', 'ID VENDEDOR', 'RUTA', 'VENDEDOR RUTA', 'COD VENDEDOR', 'CODIGO VENDEDOR']);
         const cVal = getSafeVal(row, ['CLIENTE', 'CLIENTES', 'NOMBRE', 'RAZON SOCIAL']);
-        const vStr = vVal ? String(vVal).trim() : '';
-        const p = vStr.split('-');
-        const idV = p[0].trim();
-        const nomV = p.slice(1).join('-').trim() || vStr;
+        const {
+          id: idV,
+          nombre: nomV
+        } = partirVendedor(vVal);
         const idClienteVal = getSafeVal(row, ['Id Cliente', 'ID', 'ID_Cliente', 'Codigo', 'CodCliente']);
         let idC = idClienteVal !== undefined && idClienteVal !== null ? String(idClienteVal).trim() : '';
         if (/^\d+$/.test(idC)) {
@@ -3564,7 +3695,19 @@ const PedidosAdminPanel = ({
           idCliente: idC || 'S/N',
           cliente: cVal ? String(cVal).trim() : 'Desconocido'
         };
-      }).filter(c => c.cliente && c.cliente !== 'Desconocido' && c.idVendedor && c.idCliente);
+      }).filter(c => {
+        const tieneCliente = c.cliente && c.cliente !== 'Desconocido';
+        if (!tieneCliente) {
+          omitidas.sinCliente++;
+          return false;
+        }
+        if (!c.idVendedor) {
+          omitidas.sinVendedor++;
+          if (ejemplosSinVendedor.length < 3) ejemplosSinVendedor.push(c.cliente);
+          return false;
+        }
+        return true;
+      });
       if (newCartera.length === 0) throw new Error('El archivo no contiene la información con las columnas correctas.');
       const chunksDelete = chunkArray(cartera, 450);
       await Promise.all(chunksDelete.map(chunk => {
@@ -3575,7 +3718,17 @@ const PedidosAdminPanel = ({
         return batch.commit();
       }));
       await uploadInBatches(newCartera, 'cartera');
-      return `Rutas actualizadas con ${newCartera.length} clientes.`;
+      let resumen = `Rutas actualizadas con ${newCartera.length} clientes.`;
+      if (omitidas.sinVendedor > 0) {
+        resumen += `\n\nSe omitieron ${omitidas.sinVendedor} fila(s) porque la columna VENDEDOR venía vacía. Esos clientes NO quedaron asignados a ninguna ruta.`;
+        if (ejemplosSinVendedor.length > 0) {
+          resumen += `\nEjemplos: ${ejemplosSinVendedor.join(', ')}${omitidas.sinVendedor > ejemplosSinVendedor.length ? '...' : ''}`;
+        }
+      }
+      if (omitidas.sinCliente > 0) {
+        resumen += `\n\nSe omitieron ${omitidas.sinCliente} fila(s) sin nombre de cliente.`;
+      }
+      return resumen;
     }
   };
   const handleFileUpload = async (e, type, extraParam = null) => {
@@ -4493,7 +4646,7 @@ const PedidosAdminPanel = ({
   }, "Eliminar una lista borra solo sus precios. Los productos del catálogo no se tocan."), React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"
   }, listasDisponibles.map(l => {
-    const cantidad = precios.filter(p => p.lista === l).length;
+    const cantidad = conteoPorLista[l] || 0;
     const usuariosBase = (users || []).filter(u => u.listaBase === l);
     const usuariosVen = (users || []).filter(u => Array.isArray(u.listasVisibles) && u.listasVisibles.includes(l));
     return React.createElement("div", {
@@ -4646,7 +4799,8 @@ const PedidosAdminPanel = ({
     setRuta: setCxcRuta,
     rutas: cxcRutasAdmin,
     total: cxcConRuta.length,
-    mostrados: cxcFiltradoAdmin.length
+    mostrados: cxcFiltradoAdmin.length,
+    haySinRuta: cxcSinRuta
   })), React.createElement("div", {
     className: "overflow-x-auto max-h-[400px]"
   }, React.createElement("table", {
@@ -10097,7 +10251,8 @@ const GerenteDashboard = ({
   const teamCxc = useMemo(() => {
     if (!cxc || !cartera) return [];
     const teamCartera = cartera.filter(c => myTeamIds.includes(normalizeId(c.idVendedor)) || c.vendedorNombre && myTeam.some(u => c.vendedorNombre.includes(u.id)));
-    const filteredCxc = cxc.filter(d => teamCartera.some(c => matchCxcConCliente(d, c)));
+    const buscar = crearBuscadorCartera(teamCartera);
+    const filteredCxc = cxc.filter(d => buscar(d) !== null);
     return adjuntarRutaCxc(filteredCxc, teamCartera).sort((a, b) => b.deuda - a.deuda);
   }, [cxc, cartera, myTeam, myTeamIds]);
   const teamRutasCxc = useMemo(() => rutasDeCxc(teamCxc), [teamCxc]);
@@ -11673,9 +11828,10 @@ function App() {
     });
     return result;
   }, [salesData]);
+  const idxPreciosApp = useMemo(() => indexarPrecios(preciosData), [preciosData]);
   const fullCatalogWithPrices = useMemo(() => {
     return catalogData.map(prod => {
-      const priceItem = preciosData.find(p => p.sku === prod.sku);
+      const priceItem = idxPreciosApp.cualquiera(prod.sku);
       const undFromPrice = priceItem ? priceItem.und || 0 : 0;
       const undFromSales = undPorSku[prod.sku] || 0;
       return {
@@ -11686,7 +11842,7 @@ function App() {
         und: undFromPrice > 0 ? undFromPrice : undFromSales
       };
     });
-  }, [catalogData, preciosData, undPorSku]);
+  }, [catalogData, idxPreciosApp, undPorSku]);
   const filteredUsers = useMemo(() => {
     if (!searchUserQuery) return users;
     return users.filter(u => (u.nombre || '').toLowerCase().includes(searchUserQuery.toLowerCase()) || (u.id || '').toLowerCase().includes(searchUserQuery.toLowerCase()));
