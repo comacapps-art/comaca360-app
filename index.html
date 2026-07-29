@@ -294,7 +294,9 @@ const getSafeVal = (row, possibleKeys) => {
 };
 const safeFormatDate = dateStr => {
   if (!dateStr) return 'N/D';
-  const d = new Date(dateStr);
+  const limpio = String(dateStr).trim();
+  const soloFecha = /^\d{4}-\d{2}-\d{2}$/.test(limpio);
+  const d = soloFecha ? new Date(limpio + 'T00:00:00') : new Date(dateStr);
   return isNaN(d.getTime()) ? 'N/D' : d.toLocaleDateString();
 };
 const safeFormatTime = dateStr => {
@@ -436,6 +438,52 @@ const clienteCoincide = (c, texto) => {
   if (cod.toLowerCase().includes(q)) return true;
   const qId = normalizeId(q);
   return !!qId && normalizeId(cod).includes(qId);
+};
+const PDF_ALTO_FILA_ARTICULO = 14;
+const PDF_ALTO_ENCABEZADO_PEDIDO = 48;
+const PDF_ALTO_TOTALES = 16;
+const PDF_ALTO_FOOTER = 34;
+const PDF_ALTO_MARGEN_BLOQUE = 17;
+const PDF_ALTO_UTIL_HOJA = 930;
+const PDF_ITEMS_POR_SUBPAGINA = 14;
+const alturaBloquePedido = (numArticulos, esUltimaSubpagina) => {
+  let alto = PDF_ALTO_ENCABEZADO_PEDIDO + numArticulos * PDF_ALTO_FILA_ARTICULO + PDF_ALTO_TOTALES + PDF_ALTO_MARGEN_BLOQUE;
+  if (esUltimaSubpagina) alto += PDF_ALTO_FOOTER;
+  return alto;
+};
+const paginarPedidosParaImpresion = pedidos => {
+  const bloques = [];
+  (pedidos || []).forEach((pedido, pedidoIdx) => {
+    const articulos = pedido.articulos || [];
+    const totalPages = Math.max(1, Math.ceil(articulos.length / PDF_ITEMS_POR_SUBPAGINA));
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      const pageArticulos = articulos.slice(pageIdx * PDF_ITEMS_POR_SUBPAGINA, (pageIdx + 1) * PDF_ITEMS_POR_SUBPAGINA);
+      const isLastPage = pageIdx === totalPages - 1;
+      bloques.push({
+        key: `${pedidoIdx}-${pageIdx}`,
+        pedido,
+        pageIdx,
+        totalPages,
+        pageArticulos,
+        isLastPage,
+        alto: alturaBloquePedido(pageArticulos.length, isLastPage)
+      });
+    }
+  });
+  const hojas = [];
+  let hojaActual = [];
+  let altoAcumulado = 0;
+  bloques.forEach(b => {
+    if (hojaActual.length > 0 && altoAcumulado + b.alto > PDF_ALTO_UTIL_HOJA) {
+      hojas.push(hojaActual);
+      hojaActual = [];
+      altoAcumulado = 0;
+    }
+    hojaActual.push(b);
+    altoAcumulado += b.alto;
+  });
+  if (hojaActual.length > 0) hojas.push(hojaActual);
+  return hojas;
 };
 const deudaDePedido = (cxc, pedido) => {
   if (!cxc || cxc.length === 0 || !pedido) return null;
@@ -634,6 +682,7 @@ const TASAS_HISTORIAL_SEED = `FECHA\tTASA
 const agregarActivacionPorProducto = (sales, cartera, filtros) => {
   const {
     grupo,
+    subgrupo,
     articulo,
     desde,
     hasta
@@ -672,6 +721,7 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
   (sales || []).forEach(s => {
     if (!s || !s.fecha) return;
     if (grupo && s.grupo !== grupo) return;
+    if (subgrupo && s.subgrupo !== subgrupo) return;
     if (articulo && s.articulo !== articulo) return;
     const fechaStr = String(s.fecha).slice(0, 10);
     if (desde && fechaStr < desde) return;
@@ -732,18 +782,25 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
     totalClientesSinActivar: idsInactivosUnicos.size
   };
 };
-const obtenerGruposYArticulos = (sales, grupoFiltro) => {
-  const base = grupoFiltro ? (sales || []).filter(s => s.grupo === grupoFiltro) : sales || [];
+const obtenerGruposYArticulos = (sales, filtros) => {
+  const {
+    grupo,
+    subgrupo
+  } = filtros || {};
+  const base = (sales || []).filter(s => (!grupo || s.grupo === grupo) && (!subgrupo || s.subgrupo === subgrupo));
   const grupos = new Set();
+  const subgrupos = new Set();
   const articulos = new Set();
   (sales || []).forEach(s => {
     if (s.grupo) grupos.add(s.grupo);
+    if (s.subgrupo) subgrupos.add(s.subgrupo);
   });
   base.forEach(s => {
     if (s.articulo) articulos.add(s.articulo);
   });
   return {
     grupos: Array.from(grupos).sort(),
+    subgrupos: Array.from(subgrupos).sort(),
     articulos: Array.from(articulos).sort()
   };
 };
@@ -1842,7 +1899,7 @@ const TomaPedidosView = ({
       size: 12
     }), " Sin precio — se puede pedir con nota")), React.createElement("div", {
       className: "shrink-0 flex justify-end items-end gap-2"
-    }, prod.und > 0 && React.createElement("div", {
+    }, (prod.und > 0 || !hasPrice) && React.createElement("div", {
       className: "flex flex-col items-center"
     }, React.createElement("span", {
       className: `text-[9px] font-black uppercase tracking-wider mb-1 ${hasPrice ? 'text-blue-600' : 'text-amber-600'}`
@@ -4459,432 +4516,433 @@ const PedidosAdminPanel = ({
     style: {
       width: '100%'
     }
-  }, pedidos.filter(p => selectedPedidos.includes(p.id)).flatMap((pedido, pedidoIdx) => {
-    const ITEMS_PER_PAGE = 12;
-    const articulos = pedido.articulos || [];
-    const totalPages = Math.max(1, Math.ceil(articulos.length / ITEMS_PER_PAGE));
-    return Array.from({
-      length: totalPages
-    }, (_, pageIdx) => {
-      const pageArticulos = articulos.slice(pageIdx * ITEMS_PER_PAGE, (pageIdx + 1) * ITEMS_PER_PAGE);
-      const isLastPage = pageIdx === totalPages - 1;
-      const paddedRows = [...pageArticulos];
-      while (paddedRows.length < ITEMS_PER_PAGE) paddedRows.push(null);
-      return React.createElement("div", {
-        key: `${pedidoIdx}-${pageIdx}`,
-        style: {
-          pageBreakInside: 'avoid',
-          pageBreakAfter: 'auto',
-          fontFamily: 'Arial, sans-serif',
-          fontSize: '9px',
-          border: '1px solid #64748b',
-          width: '100%',
-          marginBottom: '15px'
-        }
-      }, React.createElement("table", {
-        style: {
-          width: '100%',
-          borderCollapse: 'collapse',
-          tableLayout: 'fixed'
-        }
-      }, React.createElement("colgroup", null, React.createElement("col", {
-        style: {
-          width: '7%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '31%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '7%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '7%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '10%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '8%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '8%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '8%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '7%'
-        }
-      }), React.createElement("col", {
-        style: {
-          width: '7%'
-        }
-      })), React.createElement("tbody", null, React.createElement("tr", {
-        style: {
-          borderBottom: '1px solid #64748b'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "CLIENTE"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 700
-        },
-        colSpan: 2
-      }, "[", pedido.clienteId || 'S/N', "] ", pedido.clienteNombre, totalPages > 1 ? ` (${pageIdx + 1}/${totalPages})` : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "FECHA"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          textAlign: 'center'
-        }
-      }, safeFormatDate(pedido.fecha)), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "FACT"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "NE"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }), React.createElement("td", {
-        style: {
-          padding: '2px 3px',
-          fontWeight: 900,
-          fontSize: '8px'
-        }
-      }, "LISTA: ", React.createElement("span", {
+  }, paginarPedidosParaImpresion(pedidos.filter(p => selectedPedidos.includes(p.id))).map((hoja, hojaIdx, todasLasHojas) => React.createElement("div", {
+    key: hojaIdx,
+    style: {
+      pageBreakAfter: hojaIdx < todasLasHojas.length - 1 ? 'always' : 'auto',
+      width: '100%'
+    }
+  }, hoja.map(bloque => {
+    const {
+      pedido,
+      pageIdx,
+      totalPages,
+      pageArticulos,
+      isLastPage
+    } = bloque;
+    return React.createElement("div", {
+      key: bloque.key,
+      style: {
+        pageBreakInside: 'avoid',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '9px',
+        border: '1px solid #64748b',
+        width: '100%',
+        marginBottom: '15px'
+      }
+    }, React.createElement("table", {
+      style: {
+        width: '100%',
+        borderCollapse: 'collapse',
+        tableLayout: 'fixed'
+      }
+    }, React.createElement("colgroup", null, React.createElement("col", {
+      style: {
+        width: '7%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '31%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '7%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '7%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '10%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '8%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '8%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '8%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '7%'
+      }
+    }), React.createElement("col", {
+      style: {
+        width: '7%'
+      }
+    })), React.createElement("tbody", null, React.createElement("tr", {
+      style: {
+        borderBottom: '1px solid #64748b'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "CLIENTE"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 700
+      },
+      colSpan: 2
+    }, "[", pedido.clienteId || 'S/N', "] ", pedido.clienteNombre, totalPages > 1 ? ` (${pageIdx + 1}/${totalPages})` : ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "FECHA"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        textAlign: 'center'
+      }
+    }, safeFormatDate(pedido.fecha)), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "FACT"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "NE"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }), React.createElement("td", {
+      style: {
+        padding: '2px 3px',
+        fontWeight: 900,
+        fontSize: '8px'
+      }
+    }, "LISTA: ", React.createElement("span", {
+      style: {
+        fontWeight: 400,
+        textTransform: 'uppercase'
+      }
+    }, pedido.listaPrecio))), React.createElement("tr", {
+      style: {
+        borderBottom: '1px solid #64748b'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "RUTA :"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 700
+      },
+      colSpan: 2
+    }, pedido.vendedorId, " - ", pedido.vendedorNombre), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        background: '#e2e8f0'
+      }
+    }, "CIUDAD"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 700,
+        textAlign: 'center'
+      },
+      colSpan: 6
+    }, pedido.ciudad || '')), React.createElement("tr", {
+      style: {
+        borderBottom: '1px solid #64748b',
+        background: '#e2e8f0',
+        fontWeight: 900,
+        textAlign: 'center'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }, "COD"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        textAlign: 'left'
+      },
+      colSpan: 2
+    }, "DESCRIPCION"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }, "CAJA"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }, "UNID"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      },
+      colSpan: 2
+    }, "PRECIO"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }, "LISTA"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }, "DESC"), React.createElement("td", {
+      style: {
+        padding: '2px 3px'
+      }
+    }, "TOTAL")), pageArticulos.map((art, i) => React.createElement("tr", {
+      key: i,
+      style: {
+        borderBottom: '1px solid #cbd5e1',
+        height: '14px'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'center',
+        fontFamily: 'monospace',
+        overflow: 'hidden'
+      }
+    }, art.sku), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        fontWeight: 700,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis'
+      },
+      colSpan: 2
+    }, (art.sinPrecio ? '\u26a0 ' : '') + art.nombre + (art.sinPrecio && art.nota ? ' (' + art.nota + ')' : '')), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'center'
+      }
+    }, art.cajas > 0 ? art.cajas : ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'center'
+      }
+    }, art.unidades > 0 ? art.unidades : ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'right'
+      },
+      colSpan: 2
+    }, art.precioCaja > 0 || art.precioUnd > 0 || art.precio > 0 ? `$${Number(art.precioCaja > 0 && art.cajas > 0 && !art.unidades ? art.precioCaja : art.precioUnd > 0 && art.unidades > 0 && !art.cajas ? art.precioUnd : art.precio).toLocaleString(undefined, {
+      minimumFractionDigits: 2
+    })}` : ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'center',
+        fontSize: '7px',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        overflow: 'hidden'
+      }
+    }, art.listaAplicada ? art.listaAplicada.length > 8 ? art.listaAplicada.substring(0, 8) + '.' : art.listaAplicada : ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #cbd5e1',
+        padding: '1px 3px',
+        textAlign: 'center',
+        color: '#ea580c',
+        fontWeight: 700
+      }
+    }, art.descuento > 0 ? `${art.descuento}%` : ''), React.createElement("td", {
+      style: {
+        padding: '1px 3px',
+        textAlign: 'right',
+        fontWeight: 700
+      }
+    }, art.subtotal > 0 ? '$' + Number(art.subtotal).toLocaleString(undefined, {
+      minimumFractionDigits: 2
+    }) : art.precio > 0 && art.cantidad > 0 ? '$' + Number(art.precio * art.cantidad).toLocaleString(undefined, {
+      minimumFractionDigits: 2
+    }) : '-'))), React.createElement("tr", {
+      style: {
+        borderBottom: '1px solid #64748b',
+        borderTop: '1px solid #64748b',
+        fontWeight: 900,
+        background: '#f8fafc'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      },
+      colSpan: 3
+    }), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        textAlign: 'center'
+      }
+    }, pageArticulos.reduce((s, a) => s + (Number(a.cajas) || 0), 0) || ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        textAlign: 'center'
+      }
+    }, pageArticulos.reduce((s, a) => s + (Number(a.unidades) || 0), 0) || ''), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        textAlign: 'right'
+      },
+      colSpan: 2
+    }), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      }
+    }), React.createElement("td", {
+      style: {
+        padding: '2px 3px',
+        textAlign: 'right',
+        fontWeight: 900
+      }
+    }, isLastPage ? `$${Number(pedido.total || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2
+    })}` : `$${Number(pageArticulos.reduce((s, a) => s + (a.subtotal || 0), 0)).toLocaleString(undefined, {
+      minimumFractionDigits: 2
+    })}`)), isLastPage && React.createElement(React.Fragment, null, React.createElement("tr", {
+      style: {
+        borderBottom: '1px solid #94a3b8'
+      }
+    }, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        background: '#e2e8f0',
+        fontSize: '8px'
+      },
+      colSpan: 1
+    }, "NOTAS DEL VENDEDOR:"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      },
+      colSpan: 4
+    }, pedido.observacion || '\u00a0'), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        background: '#e2e8f0',
+        fontSize: '8px'
+      },
+      colSpan: 2
+    }, "DEUDA:"), React.createElement("td", {
+      style: {
+        padding: '2px 3px',
+        textAlign: 'right',
+        fontWeight: 900
+      },
+      colSpan: 3
+    }, (() => {
+      const d = deudaDePedido(cxc, pedido);
+      const monto = d ? Number(d.deuda) || 0 : 0;
+      if (monto <= 0) return React.createElement("span", {
         style: {
           fontWeight: 400,
-          textTransform: 'uppercase'
+          color: '#94a3b8',
+          fontSize: '8px'
         }
-      }, pedido.listaPrecio))), React.createElement("tr", {
+      }, "SIN DEUDA");
+      const docs = (d.facturas || []).length;
+      return React.createElement(React.Fragment, null, `$${money(monto)}`, docs > 0 && React.createElement("span", {
         style: {
-          borderBottom: '1px solid #64748b'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "RUTA :"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 700
-        },
-        colSpan: 2
-      }, pedido.vendedorId, " - ", pedido.vendedorNombre), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          background: '#e2e8f0'
-        }
-      }, "CIUDAD"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 700,
-          textAlign: 'center'
-        },
-        colSpan: 6
-      }, pedido.ciudad || '')), React.createElement("tr", {
-        style: {
-          borderBottom: '1px solid #64748b',
-          background: '#e2e8f0',
-          fontWeight: 900,
-          textAlign: 'center'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }, "COD"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          textAlign: 'left'
-        },
-        colSpan: 2
-      }, "DESCRIPCION"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }, "CAJA"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }, "UNID"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        },
-        colSpan: 2
-      }, "PRECIO"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }, "LISTA"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }, "DESC"), React.createElement("td", {
-        style: {
-          padding: '2px 3px'
-        }
-      }, "TOTAL")), paddedRows.map((art, i) => React.createElement("tr", {
-        key: i,
-        style: {
-          borderBottom: '1px solid #cbd5e1',
-          height: '14px'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'center',
-          fontFamily: 'monospace',
-          overflow: 'hidden'
-        }
-      }, art ? art.sku : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          fontWeight: 700,
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          textOverflow: 'ellipsis'
-        },
-        colSpan: 2
-      }, art ? (art.sinPrecio ? '\u26a0 ' : '') + art.nombre + (art.sinPrecio && art.nota ? ' (' + art.nota + ')' : '') : '\u00a0'), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'center'
-        }
-      }, art && art.cajas > 0 ? art.cajas : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'center'
-        }
-      }, art && art.unidades > 0 ? art.unidades : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'right'
-        },
-        colSpan: 2
-      }, art && (art.precioCaja > 0 || art.precioUnd > 0 || art.precio > 0) ? `$${Number(art.precioCaja > 0 && art.cajas > 0 && !art.unidades ? art.precioCaja : art.precioUnd > 0 && art.unidades > 0 && !art.cajas ? art.precioUnd : art.precio).toLocaleString(undefined, {
-        minimumFractionDigits: 2
-      })}` : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'center',
+          fontWeight: 400,
           fontSize: '7px',
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          overflow: 'hidden'
+          color: '#475569'
         }
-      }, art && art.listaAplicada ? art.listaAplicada.length > 8 ? art.listaAplicada.substring(0, 8) + '.' : art.listaAplicada : ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #cbd5e1',
-          padding: '1px 3px',
-          textAlign: 'center',
-          color: '#ea580c',
-          fontWeight: 700
-        }
-      }, art && art.descuento > 0 ? `${art.descuento}%` : ''), React.createElement("td", {
-        style: {
-          padding: '1px 3px',
-          textAlign: 'right',
-          fontWeight: 700
-        }
-      }, art ? art.subtotal > 0 ? '$' + Number(art.subtotal).toLocaleString(undefined, {
-        minimumFractionDigits: 2
-      }) : art.precio > 0 && art.cantidad > 0 ? '$' + Number(art.precio * art.cantidad).toLocaleString(undefined, {
-        minimumFractionDigits: 2
-      }) : '-' : ''))), React.createElement("tr", {
-        style: {
-          borderBottom: '1px solid #64748b',
-          borderTop: '1px solid #64748b',
-          fontWeight: 900,
-          background: '#f8fafc'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        },
-        colSpan: 3
-      }), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          textAlign: 'center'
-        }
-      }, pageArticulos.reduce((s, a) => s + (Number(a.cajas) || 0), 0) || ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          textAlign: 'center'
-        }
-      }, pageArticulos.reduce((s, a) => s + (Number(a.unidades) || 0), 0) || ''), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          textAlign: 'right'
-        },
-        colSpan: 2
-      }), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        }
-      }), React.createElement("td", {
-        style: {
-          padding: '2px 3px',
-          textAlign: 'right',
-          fontWeight: 900
-        }
-      }, isLastPage ? `$${Number(pedido.total || 0).toLocaleString(undefined, {
-        minimumFractionDigits: 2
-      })}` : `$${Number(pageArticulos.reduce((s, a) => s + (a.subtotal || 0), 0)).toLocaleString(undefined, {
-        minimumFractionDigits: 2
-      })}`)), isLastPage && React.createElement(React.Fragment, null, React.createElement("tr", {
-        style: {
-          borderBottom: '1px solid #94a3b8'
-        }
-      }, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          background: '#e2e8f0',
-          fontSize: '8px'
-        },
-        colSpan: 1
-      }, "NOTAS DEL VENDEDOR:"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        },
-        colSpan: 4
-      }, pedido.observacion || '\u00a0'), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          background: '#e2e8f0',
-          fontSize: '8px'
-        },
-        colSpan: 2
-      }, "DEUDA:"), React.createElement("td", {
-        style: {
-          padding: '2px 3px',
-          textAlign: 'right',
-          fontWeight: 900
-        },
-        colSpan: 3
-      }, (() => {
-        const d = deudaDePedido(cxc, pedido);
-        const monto = d ? Number(d.deuda) || 0 : 0;
-        if (monto <= 0) return React.createElement("span", {
-          style: {
-            fontWeight: 400,
-            color: '#94a3b8',
-            fontSize: '8px'
-          }
-        }, "SIN DEUDA");
-        const docs = (d.facturas || []).length;
-        return React.createElement(React.Fragment, null, `$${money(monto)}`, docs > 0 && React.createElement("span", {
-          style: {
-            fontWeight: 400,
-            fontSize: '7px',
-            color: '#475569'
-          }
-        }, ` (${docs} fact.)`));
-      })())), React.createElement("tr", null, React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px',
-          fontWeight: 900,
-          background: '#e2e8f0',
-          fontSize: '8px'
-        }
-      }, "OBSERVACIONES CXC:"), React.createElement("td", {
-        style: {
-          borderRight: '1px solid #64748b',
-          padding: '2px 3px'
-        },
-        colSpan: 4
-      }), React.createElement("td", {
-        style: {
-          padding: '4px 3px',
-          fontWeight: 900,
-          textAlign: 'center',
-          fontSize: '8px',
-          letterSpacing: '1px'
-        },
-        colSpan: 5
-      }, "AUTORIZADO"))))));
-    });
-  }))))), React.createElement("div", {
+      }, ` (${docs} fact.)`));
+    })())), React.createElement("tr", null, React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px',
+        fontWeight: 900,
+        background: '#e2e8f0',
+        fontSize: '8px'
+      }
+    }, "OBSERVACIONES CXC:"), React.createElement("td", {
+      style: {
+        borderRight: '1px solid #64748b',
+        padding: '2px 3px'
+      },
+      colSpan: 4
+    }), React.createElement("td", {
+      style: {
+        padding: '4px 3px',
+        fontWeight: 900,
+        textAlign: 'center',
+        fontSize: '8px',
+        letterSpacing: '1px'
+      },
+      colSpan: 5
+    }, "AUTORIZADO"))))));
+  }))))))), React.createElement("div", {
     className: "bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex gap-2 overflow-x-auto"
   }, hasTabAccess('pedidos') && React.createElement("button", {
     onClick: () => setActiveTab('pedidos'),
@@ -6238,6 +6296,7 @@ const ActivacionProductoPanel = ({
   cartera
 }) => {
   const [grupo, setGrupo] = useState('');
+  const [subgrupo, setSubgrupo] = useState('');
   const [articulo, setArticulo] = useState('');
   const [rutaExpandida, setRutaExpandida] = useState(null);
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -6248,23 +6307,28 @@ const ActivacionProductoPanel = ({
   }, [sales]);
   const salesMesActual = useMemo(() => sales.filter(s => s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr)), [sales, currentMonthStr]);
   const {
-    grupos
-  } = useMemo(() => obtenerGruposYArticulos(salesMesActual, ''), [salesMesActual]);
+    grupos,
+    subgrupos
+  } = useMemo(() => obtenerGruposYArticulos(salesMesActual, {}), [salesMesActual]);
   const {
     articulos
-  } = useMemo(() => obtenerGruposYArticulos(salesMesActual, grupo), [salesMesActual, grupo]);
+  } = useMemo(() => obtenerGruposYArticulos(salesMesActual, {
+    grupo,
+    subgrupo
+  }), [salesMesActual, grupo, subgrupo]);
   useEffect(() => {
     if (articulo && !articulos.includes(articulo)) setArticulo('');
   }, [articulos, articulo]);
   const resultado = useMemo(() => agregarActivacionPorProducto(salesMesActual, cartera, {
     grupo,
+    subgrupo,
     articulo
-  }), [salesMesActual, cartera, grupo, articulo]);
+  }), [salesMesActual, cartera, grupo, subgrupo, articulo]);
   useEffect(() => {
     setRutaExpandida(resultado.porRuta.length === 1 ? resultado.porRuta[0].idVendedor : null);
     setVistaCliente('activos');
   }, [resultado]);
-  const hayFiltroProducto = grupo || articulo;
+  const hayFiltroProducto = grupo || subgrupo || articulo;
   const rutaAbierta = resultado.porRuta.find(r => r.idVendedor === rutaExpandida);
   const listaVista = rutaAbierta ? vistaCliente === 'activos' ? rutaAbierta.clientes : rutaAbierta.clientesInactivos : [];
   const clientesFiltrados = useMemo(() => {
@@ -6306,18 +6370,32 @@ const ActivacionProductoPanel = ({
     className: "flex flex-col gap-1"
   }, React.createElement("label", {
     className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Subgrupo"), React.createElement("select", {
+    value: subgrupo,
+    onChange: e => setSubgrupo(e.target.value),
+    className: inputCls + ' cursor-pointer min-w-[180px]'
+  }, React.createElement("option", {
+    value: ""
+  }, "Todos los subgrupos"), subgrupos.map(sg => React.createElement("option", {
+    key: sg,
+    value: sg
+  }, sg)))), React.createElement("div", {
+    className: "flex flex-col gap-1"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
   }, "Producto"), React.createElement("select", {
     value: articulo,
     onChange: e => setArticulo(e.target.value),
     className: inputCls + ' cursor-pointer min-w-[220px]'
   }, React.createElement("option", {
     value: ""
-  }, "Todos los productos", grupo ? ' del grupo' : ''), articulos.map(a => React.createElement("option", {
+  }, "Todos los productos", grupo || subgrupo ? ' del filtro' : ''), articulos.map(a => React.createElement("option", {
     key: a,
     value: a
   }, a)))), hayFiltroProducto && React.createElement("button", {
     onClick: () => {
       setGrupo('');
+      setSubgrupo('');
       setArticulo('');
     },
     className: "p-2.5 bg-red-50 text-red-500 hover:bg-red-100 rounded-xl transition-colors shadow-sm",
@@ -6330,7 +6408,7 @@ const ActivacionProductoPanel = ({
     className: "bg-gradient-to-r from-blue-900 to-blue-800 rounded-2xl shadow-sm p-6 text-white"
   }, React.createElement("p", {
     className: "text-[11px] font-bold text-blue-200 uppercase tracking-wider"
-  }, hayFiltroProducto ? `Activos en ${articulo || grupo}` : 'Clientes activos'), React.createElement("p", {
+  }, hayFiltroProducto ? `Activos en ${articulo || subgrupo || grupo}` : 'Clientes activos'), React.createElement("p", {
     className: "text-3xl font-black"
   }, resultado.totalClientesActivos)), React.createElement("div", {
     className: "bg-gradient-to-r from-amber-600 to-orange-500 rounded-2xl shadow-sm p-6 text-white"
@@ -11184,6 +11262,8 @@ const GerenteDashboard = ({
     const clientesUnicos = new Set();
     const productosUnicos = new Set();
     const facturasUnicas = new Set();
+    const teamLogradoGrupos = {};
+    const teamLogradoSubgrupos = {};
     myTeam.forEach(u => {
       const normId = normalizeId(u.id);
       vendedoresMap[normId] = {
@@ -11217,6 +11297,26 @@ const GerenteDashboard = ({
         if (vendedoresMap[vIdNorm]) vendedoresMap[vIdNorm].clientesLogrados.add(sale.idCliente);
       }
       if (sale.numero && sale.tipoDoc !== 'DV') facturasUnicas.add(sale.numero);
+      const grupoTeam = sale.grupo || 'GENERAL';
+      if (!teamLogradoGrupos[grupoTeam]) teamLogradoGrupos[grupoTeam] = {
+        monto: 0,
+        cajas: 0,
+        kilos: 0
+      };
+      teamLogradoGrupos[grupoTeam].monto += sale.monto;
+      teamLogradoGrupos[grupoTeam].cajas += sale.cajas || 0;
+      teamLogradoGrupos[grupoTeam].kilos += sale.kilos || 0;
+      const subgrupoTeam = sale.subgrupo || 'SIN SUBGRUPO';
+      if (!teamLogradoSubgrupos[subgrupoTeam]) teamLogradoSubgrupos[subgrupoTeam] = {
+        monto: 0,
+        cajas: 0,
+        kilos: 0,
+        clientesUnicos: new Set()
+      };
+      teamLogradoSubgrupos[subgrupoTeam].monto += sale.monto;
+      teamLogradoSubgrupos[subgrupoTeam].cajas += sale.cajas || 0;
+      teamLogradoSubgrupos[subgrupoTeam].kilos += sale.kilos || 0;
+      if (sale.monto > 0) teamLogradoSubgrupos[subgrupoTeam].clientesUnicos.add(sale.idCliente);
       const vIdNorm = normalizeId(sale.idVendedor);
       if (vendedoresMap[vIdNorm]) {
         vendedoresMap[vIdNorm].monto += sale.monto;
@@ -11272,9 +11372,41 @@ const GerenteDashboard = ({
       ranking,
       productos: productosUnicos.size,
       precioPromedio,
-      ticketPromedio
+      ticketPromedio,
+      logradoGrupos: teamLogradoGrupos,
+      logradoSubgrupos: teamLogradoSubgrupos
     };
   }, [sales, myTeam, myTeamIds, currentMonthStr]);
+  const teamMetaGrupos = useMemo(() => {
+    const acc = {};
+    myTeam.forEach(u => {
+      Object.entries(u.metas?.grupos || {}).forEach(([grupo, m]) => {
+        if (!acc[grupo]) acc[grupo] = {
+          monto: 0,
+          cajas: 0
+        };
+        acc[grupo].monto += Number(m.monto) || 0;
+        acc[grupo].cajas += Number(m.cajas) || 0;
+      });
+    });
+    return acc;
+  }, [myTeam]);
+  const teamMetaSubgrupos = useMemo(() => {
+    const acc = {};
+    myTeam.forEach(u => {
+      Object.entries(u.metas?.subgrupos || {}).forEach(([subgrupo, m]) => {
+        if (!acc[subgrupo]) acc[subgrupo] = {
+          monto: 0,
+          cajas: 0,
+          clientes: 0
+        };
+        acc[subgrupo].monto += Number(m.monto) || 0;
+        acc[subgrupo].cajas += Number(m.cajas) || 0;
+        acc[subgrupo].clientes += Number(m.clientes) || 0;
+      });
+    });
+    return acc;
+  }, [myTeam]);
   const teamMetaMonto = myTeam.reduce((acc, curr) => acc + (Number(curr.metas?.monto) || 0), 0);
   const teamMetaCajas = myTeam.reduce((acc, curr) => acc + (Number(curr.metas?.cajas) || 0), 0);
   const teamMetaUnidades = myTeam.reduce((acc, curr) => acc + (Number(curr.metas?.unidades) || 0), 0);
@@ -11580,7 +11712,136 @@ const GerenteDashboard = ({
     }, ((logrado.clientesUnicos?.size || 0) / meta.clientes * 100).toFixed(1), "%")));
   }))))))) : React.createElement("div", {
     className: "text-sm text-slate-500 text-center py-4"
-  }, "Aún no hay ventas registradas en el equipo."))))), activeTab === 'cxc' && React.createElement("div", {
+  }, "Aún no hay ventas registradas en el equipo.")))), (Object.keys(teamMetaGrupos).length > 0 || Object.keys(teamMetaSubgrupos).length > 0) && React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, React.createElement("h3", {
+    className: "text-xl font-black text-purple-900 mb-1 flex items-center gap-3 border-b border-slate-100 pb-4"
+  }, React.createElement(Target, {
+    className: "text-orange-500"
+  }), " Objetivos del Equipo por Marca y Subgrupo"), React.createElement("p", {
+    className: "text-slate-500 text-sm font-medium mb-5 mt-3"
+  }, "Suma de las metas asignadas a cada vendedor del equipo, contra el resultado real de todo el equipo junto — sin tener que abrir vendedor por vendedor."), React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-2 gap-8"
+  }, Object.keys(teamMetaGrupos).length > 0 && React.createElement("div", {
+    className: "overflow-x-auto"
+  }, React.createElement("h4", {
+    className: "font-bold text-slate-600 border-b border-slate-200 pb-2 mb-2 text-[10px] uppercase"
+  }, "Por Marca (Grupo)"), React.createElement("table", {
+    className: "w-full text-left text-[11px]"
+  }, React.createElement("thead", {
+    className: "text-[10px] text-slate-400 uppercase border-b border-slate-200"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "py-1 font-bold"
+  }, "Marca / Métrica"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "Meta Equipo"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "Logrado Equipo"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "%"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, Object.entries(teamMetaGrupos).map(([grupo, meta]) => {
+    const logrado = teamStats.logradoGrupos?.[grupo] || {
+      monto: 0,
+      cajas: 0
+    };
+    return React.createElement(React.Fragment, {
+      key: grupo
+    }, meta.monto > 0 && React.createElement("tr", null, React.createElement("td", {
+      className: "py-1.5 font-bold text-slate-700 flex items-center gap-1.5"
+    }, React.createElement("span", {
+      className: "text-[9px] font-black text-white bg-slate-400 px-1.5 py-0.5 rounded"
+    }, grupo), " Dinero ($)"), React.createElement("td", {
+      className: "py-1.5 text-right font-medium text-slate-500"
+    }, "$", meta.monto.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: "py-1.5 text-right font-black text-purple-800"
+    }, "$", logrado.monto.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: `py-1.5 text-right ${logrado.monto / meta.monto * 100 >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`
+    }, (logrado.monto / meta.monto * 100).toFixed(1), "%")), meta.cajas > 0 && React.createElement("tr", null, React.createElement("td", {
+      className: "py-1.5 font-bold text-slate-700 flex items-center gap-1.5"
+    }, React.createElement("span", {
+      className: "text-[9px] font-black text-white bg-slate-400 px-1.5 py-0.5 rounded"
+    }, grupo), " Cajas (Cj)"), React.createElement("td", {
+      className: "py-1.5 text-right font-medium text-slate-500"
+    }, meta.cajas.toLocaleString()), React.createElement("td", {
+      className: "py-1.5 text-right font-black text-yellow-600"
+    }, logrado.cajas.toLocaleString(undefined, {
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: `py-1.5 text-right ${logrado.cajas / meta.cajas * 100 >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`
+    }, (logrado.cajas / meta.cajas * 100).toFixed(1), "%")));
+  })))), Object.keys(teamMetaSubgrupos).length > 0 && React.createElement("div", {
+    className: "overflow-x-auto"
+  }, React.createElement("h4", {
+    className: "font-bold text-slate-600 border-b border-slate-200 pb-2 mb-2 text-[10px] uppercase"
+  }, "Por Subgrupo"), React.createElement("table", {
+    className: "w-full text-left text-[11px]"
+  }, React.createElement("thead", {
+    className: "text-[10px] text-slate-400 uppercase border-b border-slate-200"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "py-1 font-bold"
+  }, "Subgrupo / Métrica"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "Meta Equipo"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "Logrado Equipo"), React.createElement("th", {
+    className: "py-1 text-right font-bold"
+  }, "%"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, Object.entries(teamMetaSubgrupos).map(([subgrupo, meta]) => {
+    const logrado = teamStats.logradoSubgrupos?.[subgrupo] || {
+      monto: 0,
+      cajas: 0,
+      clientesUnicos: new Set()
+    };
+    return React.createElement(React.Fragment, {
+      key: subgrupo
+    }, meta.monto > 0 && React.createElement("tr", null, React.createElement("td", {
+      className: "py-1.5 font-bold text-slate-700 flex items-center gap-1.5"
+    }, React.createElement("span", {
+      className: "text-[9px] font-black text-white bg-blue-500 px-1.5 py-0.5 rounded"
+    }, subgrupo), " Dinero ($)"), React.createElement("td", {
+      className: "py-1.5 text-right font-medium text-slate-500"
+    }, "$", meta.monto.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: "py-1.5 text-right font-black text-purple-800"
+    }, "$", logrado.monto.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: `py-1.5 text-right ${logrado.monto / meta.monto * 100 >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`
+    }, (logrado.monto / meta.monto * 100).toFixed(1), "%")), meta.cajas > 0 && React.createElement("tr", null, React.createElement("td", {
+      className: "py-1.5 font-bold text-slate-700 flex items-center gap-1.5"
+    }, React.createElement("span", {
+      className: "text-[9px] font-black text-white bg-blue-500 px-1.5 py-0.5 rounded"
+    }, subgrupo), " Cajas (Cj)"), React.createElement("td", {
+      className: "py-1.5 text-right font-medium text-slate-500"
+    }, meta.cajas.toLocaleString()), React.createElement("td", {
+      className: "py-1.5 text-right font-black text-yellow-600"
+    }, logrado.cajas.toLocaleString(undefined, {
+      maximumFractionDigits: 2
+    })), React.createElement("td", {
+      className: `py-1.5 text-right ${logrado.cajas / meta.cajas * 100 >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`
+    }, (logrado.cajas / meta.cajas * 100).toFixed(1), "%")), meta.clientes > 0 && React.createElement("tr", null, React.createElement("td", {
+      className: "py-1.5 font-bold text-slate-700 flex items-center gap-1.5"
+    }, React.createElement("span", {
+      className: "text-[9px] font-black text-white bg-blue-500 px-1.5 py-0.5 rounded"
+    }, subgrupo), " Activación (Cl)"), React.createElement("td", {
+      className: "py-1.5 text-right font-medium text-slate-500"
+    }, meta.clientes.toLocaleString()), React.createElement("td", {
+      className: "py-1.5 text-right font-black text-green-600"
+    }, logrado.clientesUnicos?.size || 0), React.createElement("td", {
+      className: `py-1.5 text-right ${(logrado.clientesUnicos?.size || 0) / meta.clientes * 100 >= 100 ? 'text-green-600 font-black' : 'text-orange-500 font-bold'}`
+    }, ((logrado.clientesUnicos?.size || 0) / meta.clientes * 100).toFixed(1), "%")));
+  }))))))), activeTab === 'cxc' && React.createElement("div", {
     className: "space-y-6 animate-fadeIn"
   }, React.createElement("div", {
     className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center"
@@ -12115,6 +12376,7 @@ function mapGitHubSalesRow(row, fileObj) {
     })(),
     cliente: clienteVal,
     grupo: String(getVal(['Grupo', 'Subgrupo', 'Linea', 'Marca']) || 'GENERAL').trim().toUpperCase(),
+    subgrupo: String(getVal(['Subgrupo', 'Sub Grupo', 'SubGrupo', 'Sub-Grupo', 'SubLinea', 'Sub Linea']) || '').trim().toUpperCase(),
     idVendedor: String(getVal(['IdVendedor', 'CodigoVendedor', 'CodVendedor']) || 'S/N').trim(),
     vendedor: String(getVal(['Vendedor', 'Venedor', 'NombreVendedor']) || 'Sin Asignar').trim().toUpperCase(),
     supervisor: String(getVal(['Supervisor', 'Gerente']) || 'Sin Asignar').trim().toUpperCase(),
