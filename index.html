@@ -34,8 +34,21 @@
             }
         }
 
+        /* Sin "forwards": el estilo final del keyframe (opacity:1, transform:translateY(0))
+           ya coincide con el valor normal del elemento cuando no hay animación corriendo, así
+           que al terminar no hace falta "sostenerlo" — y evitar forwards importa porque
+           sostenerlo con fill-mode deja un transform "fantasma" (el navegador lo reporta como
+           matrix(1,0,0,1,0,0), NUNCA como el keyword "none", aunque no mueva nada visualmente).
+           Cualquier transform que no sea literalmente "none" convierte al elemento en
+           "containing block" de sus descendientes con position:fixed (regla del spec de CSS
+           Transforms) — así que cualquier modal (Impresión Masiva, Gestión de Pedido, etc.)
+           anidado dentro de un contenedor con esta clase quedaba anclado a ESE contenedor con
+           scroll en vez de a la ventana real, obligando a hacer scroll para encontrarlo en
+           listas largas. Sin forwards, al terminar la animación el navegador vuelve a aplicar
+           el valor real (sin ninguna animación de por medio) y transform vuelve a "none".
+        */
         .animate-fadeIn {
-            animation: fadeIn 0.4s ease-out forwards;
+            animation: fadeIn 0.4s ease-out;
         }
 
         ::-webkit-scrollbar {
@@ -394,6 +407,7 @@ const crearBuscadorCartera = cartera => {
     if (cod) {
       const c = porCodigo.get(cod);
       if (c) return c;
+      if (porCodigo.size > 0) return null;
     }
     if (d.rawCliente) {
       const c = porNombre.get(d.rawCliente);
@@ -405,6 +419,22 @@ const crearBuscadorCartera = cartera => {
     }
     return lista.find(c => matchCxcConCliente(d, c)) || null;
   };
+};
+const filtrarCarteraPorVendedor = (cartera, vendedorId) => {
+  const vid = normalizeId(vendedorId);
+  return (cartera || []).filter(c => {
+    const codC = normalizeId(c.idVendedor);
+    if (codC) return codC === vid;
+    return (c.vendedorNombre || '').includes(vendedorId);
+  });
+};
+const filtrarCarteraPorEquipo = (cartera, teamIds, teamUsers) => {
+  const idsNorm = new Set((teamIds || []).map(normalizeId));
+  return (cartera || []).filter(c => {
+    const codC = normalizeId(c.idVendedor);
+    if (codC) return idsNorm.has(codC);
+    return (teamUsers || []).some(u => (c.vendedorNombre || '').includes(u.id));
+  });
 };
 const adjuntarRutaCxc = (cxc, cartera) => {
   if (!Array.isArray(cxc)) return [];
@@ -439,18 +469,8 @@ const clienteCoincide = (c, texto) => {
   const qId = normalizeId(q);
   return !!qId && normalizeId(cod).includes(qId);
 };
-const PDF_ALTO_FILA_ARTICULO = 14;
-const PDF_ALTO_ENCABEZADO_PEDIDO = 48;
-const PDF_ALTO_TOTALES = 16;
-const PDF_ALTO_FOOTER = 34;
-const PDF_ALTO_MARGEN_BLOQUE = 17;
-const PDF_ALTO_UTIL_HOJA = 930;
-const PDF_ITEMS_POR_SUBPAGINA = 14;
-const alturaBloquePedido = (numArticulos, esUltimaSubpagina) => {
-  let alto = PDF_ALTO_ENCABEZADO_PEDIDO + numArticulos * PDF_ALTO_FILA_ARTICULO + PDF_ALTO_TOTALES + PDF_ALTO_MARGEN_BLOQUE;
-  if (esUltimaSubpagina) alto += PDF_ALTO_FOOTER;
-  return alto;
-};
+const PDF_ITEMS_POR_SUBPAGINA = 10;
+const PDF_PEDIDOS_POR_HOJA = 3;
 const paginarPedidosParaImpresion = pedidos => {
   const bloques = [];
   (pedidos || []).forEach((pedido, pedidoIdx) => {
@@ -465,31 +485,15 @@ const paginarPedidosParaImpresion = pedidos => {
         pageIdx,
         totalPages,
         pageArticulos,
-        isLastPage,
-        alto: alturaBloquePedido(pageArticulos.length, isLastPage)
+        isLastPage
       });
     }
   });
   const hojas = [];
-  let hojaActual = [];
-  let altoAcumulado = 0;
-  bloques.forEach(b => {
-    if (hojaActual.length > 0 && altoAcumulado + b.alto > PDF_ALTO_UTIL_HOJA) {
-      hojas.push(hojaActual);
-      hojaActual = [];
-      altoAcumulado = 0;
-    }
-    hojaActual.push(b);
-    altoAcumulado += b.alto;
-  });
-  if (hojaActual.length > 0) hojas.push(hojaActual);
+  for (let i = 0; i < bloques.length; i += PDF_PEDIDOS_POR_HOJA) {
+    hojas.push(bloques.slice(i, i + PDF_PEDIDOS_POR_HOJA));
+  }
   return hojas;
-};
-const deudaDePedido = (cxc, pedido) => {
-  if (!cxc || cxc.length === 0 || !pedido) return null;
-  return cxc.find(d => matchCxcConCliente(d, {
-    cliente: pedido.clienteNombre
-  }) || pedido.clienteId && normalizeId(d.idCliente) === normalizeId(pedido.clienteId)) || null;
 };
 const fechaDMYaISO = txt => {
   const m = String(txt || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -1153,6 +1157,7 @@ const GestorPedidoModal = ({
   pedido,
   precios,
   cxc,
+  cartera,
   onClose,
   db,
   getCollectionPath,
@@ -1164,7 +1169,16 @@ const GestorPedidoModal = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [showFacturas, setShowFacturas] = useState(false);
-  const clientDebtData = useMemo(() => deudaDePedido(cxc, pedido), [cxc, pedido]);
+  const buscarDeuda = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
+  const clientDebtData = useMemo(() => buscarDeuda({
+    idCliente: pedido.clienteId,
+    cliente: pedido.clienteNombre
+  }), [buscarDeuda, pedido]);
+  const buscarClienteCartera = useMemo(() => crearBuscadorCartera(cartera), [cartera]);
+  const ciudadPedido = buscarClienteCartera({
+    idCliente: pedido.clienteId,
+    clienteNombre: pedido.clienteNombre
+  })?.ciudad || pedido.ciudad || '';
   const handleListaChange = e => {
     const newLista = e.target.value;
     setSelectedLista(newLista);
@@ -1317,12 +1331,12 @@ const GestorPedidoModal = ({
     className: "text-xs text-slate-400 font-bold uppercase mb-1"
   }, "Datos del Cliente"), React.createElement("p", {
     className: "font-black text-slate-800 text-lg leading-tight"
-  }, "[", pedido.clienteId || 'S/N', "] ", pedido.clienteNombre || 'Sin Nombre'), pedido.ciudad && React.createElement("p", {
+  }, "[", pedido.clienteId || 'S/N', "] ", pedido.clienteNombre || 'Sin Nombre'), ciudadPedido && React.createElement("p", {
     className: "text-sm font-bold text-slate-600 mt-1 uppercase"
   }, React.createElement(MapPin, {
     size: 14,
     className: "inline mr-1 text-orange-500"
-  }), pedido.ciudad), React.createElement("p", {
+  }), ciudadPedido), React.createElement("p", {
     className: "text-sm text-slate-500 mt-1 font-mono italic"
   }, "Documento de Pedido")), React.createElement("div", null, React.createElement("p", {
     className: "text-xs text-slate-400 font-bold uppercase mb-1"
@@ -1513,6 +1527,7 @@ const TomaPedidosView = ({
   const [observacion, setObservacion] = useState('');
   const [showDebtDetail, setShowDebtDetail] = useState(false);
   const [itemLists, setItemLists] = useState({});
+  const buscarDeudaDetalle = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
   const listasDisponibles = useMemo(() => [...new Set(precios.map(p => p.lista).filter(Boolean))], [precios]);
   const listasPermitidas = useMemo(() => {
     const isAdminOrGerente = currentUser.rol === 'admin' || currentUser.rol === 'gerente';
@@ -2169,7 +2184,10 @@ const TomaPedidosView = ({
   }, "Saldo"))), React.createElement("tbody", {
     className: "divide-y divide-slate-100"
   }, (() => {
-    const clientCxc = cxc?.find(d => d.rawCliente === client.cliente || d.clienteNombre === client.cliente || d.idCliente && client.cliente.includes(d.idCliente));
+    const clientCxc = buscarDeudaDetalle({
+      idCliente: client.idCliente,
+      cliente: client.cliente
+    });
     if (!clientCxc || !clientCxc.facturas || clientCxc.facturas.length === 0) {
       return React.createElement("tr", null, React.createElement("td", {
         colSpan: "4",
@@ -2284,7 +2302,7 @@ const PagosVendedorView = ({
   const [histEstado, setHistEstado] = useState('ALL');
   const miCartera = useMemo(() => {
     const esMando = currentUser.rol === 'admin' || currentUser.rol === 'gerente';
-    return esMando ? cartera : cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(currentUser.id) || (c.vendedorNombre || '').includes(currentUser.id));
+    return esMando ? cartera : filtrarCarteraPorVendedor(cartera, currentUser.id);
   }, [cartera, currentUser]);
   const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, clienteBusqueda)).slice(0, 30), [miCartera, clienteBusqueda]);
   const idxTasas = useMemo(() => indexarTasas(tasas), [tasas]);
@@ -2695,6 +2713,152 @@ const PagosVendedorView = ({
     className: "font-medium"
   }, "Todavía no has reportado pagos con estos filtros.")))));
 };
+const DetallePedidoVendedorModal = ({
+  pedido,
+  onClose
+}) => {
+  const [isPrinting, setIsPrinting] = useState(false);
+  const handlePrint = async () => {
+    if (!window.html2pdf) return;
+    setIsPrinting(true);
+    const element = document.getElementById('detalle-pedido-vendedor-print');
+    const cleanName = (pedido.clienteNombre || 'Pedido').replace(/[^a-z0-9]/gi, '_');
+    const opt = {
+      margin: 0.5,
+      filename: `Pedido_${cleanName}.pdf`,
+      image: {
+        type: 'jpeg',
+        quality: 0.98
+      },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false
+      },
+      jsPDF: {
+        unit: 'in',
+        format: 'letter',
+        orientation: 'portrait'
+      }
+    };
+    try {
+      await window.html2pdf().set(opt).from(element).save();
+    } catch (e) {
+      console.error(e);
+    }
+    setIsPrinting(false);
+  };
+  const articulos = pedido.articulos || [];
+  return React.createElement("div", {
+    className: "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print-modal"
+  }, React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col print-scroll-reset"
+  }, React.createElement("div", {
+    className: "p-6 border-b border-slate-200 flex justify-between items-center shrink-0 bg-white rounded-t-2xl print-hide"
+  }, React.createElement("h2", {
+    className: "text-xl font-black text-blue-900 flex items-center gap-2"
+  }, React.createElement(FileText, {
+    className: "text-orange-500"
+  }), " Detalle del Pedido"), React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("button", {
+    onClick: handlePrint,
+    disabled: isPrinting,
+    className: "px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold rounded-xl flex items-center gap-2 transition-colors shadow-sm text-sm"
+  }, isPrinting ? 'Generando...' : React.createElement(React.Fragment, null, React.createElement(Printer, {
+    size: 16
+  }), " Imprimir")), React.createElement("button", {
+    onClick: onClose,
+    className: "p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+  }, React.createElement(X, {
+    size: 20
+  })))), React.createElement("div", {
+    id: "detalle-pedido-vendedor-print",
+    className: "p-8 flex-1 overflow-y-auto bg-white print-scroll-reset"
+  }, React.createElement("div", {
+    className: "border-b-2 border-slate-800 pb-6 mb-6"
+  }, React.createElement("div", {
+    className: "flex flex-col sm:flex-row justify-between items-start mb-6 gap-4"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "text-2xl font-black text-slate-800 tracking-tighter"
+  }, "COMACA ", React.createElement("span", {
+    className: "text-orange-500"
+  }, "360")), React.createElement("p", {
+    className: "text-sm font-bold text-slate-500 uppercase tracking-widest mt-1"
+  }, "Detalle del Pedido")), React.createElement("div", {
+    className: "text-left sm:text-right"
+  }, React.createElement("p", {
+    className: "text-sm font-bold text-slate-800"
+  }, "Fecha: ", safeFormatDate(pedido.fecha)), React.createElement("p", {
+    className: "text-sm text-slate-500"
+  }, "Hora: ", safeFormatTime(pedido.fecha)), React.createElement("p", {
+    className: "text-sm font-bold mt-2"
+  }, "Estado: ", React.createElement("span", {
+    className: `uppercase ${pedido.estado === 'Aprobado' ? 'text-green-600' : pedido.estado === 'Rechazado' ? 'text-red-600' : 'text-yellow-600'}`
+  }, pedido.estado || 'Pendiente')))), React.createElement("div", {
+    className: "bg-slate-50 p-5 rounded-xl border border-slate-100"
+  }, React.createElement("p", {
+    className: "text-xs text-slate-400 font-bold uppercase mb-1"
+  }, "Cliente"), React.createElement("p", {
+    className: "font-black text-slate-800 text-lg leading-tight"
+  }, "[", pedido.clienteId || 'S/N', "] ", pedido.clienteNombre || 'Sin Nombre'), pedido.ciudad && React.createElement("p", {
+    className: "text-sm font-bold text-slate-600 mt-1 uppercase"
+  }, React.createElement(MapPin, {
+    size: 14,
+    className: "inline mr-1 text-orange-500"
+  }), pedido.ciudad))), React.createElement("table", {
+    className: "w-full text-sm text-left mb-6"
+  }, React.createElement("thead", {
+    className: "bg-slate-50 text-slate-500 text-[10px] uppercase font-black"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "px-3 py-2"
+  }, "Producto"), React.createElement("th", {
+    className: "px-3 py-2 text-center"
+  }, "Cajas"), React.createElement("th", {
+    className: "px-3 py-2 text-center"
+  }, "Unid."), React.createElement("th", {
+    className: "px-3 py-2 text-right"
+  }, "Precio"), React.createElement("th", {
+    className: "px-3 py-2 text-right"
+  }, "Subtotal"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, articulos.map((art, i) => React.createElement("tr", {
+    key: i
+  }, React.createElement("td", {
+    className: "px-3 py-2 font-bold text-slate-700"
+  }, art.nombre), React.createElement("td", {
+    className: "px-3 py-2 text-center"
+  }, art.cajas > 0 ? art.cajas : ''), React.createElement("td", {
+    className: "px-3 py-2 text-center"
+  }, art.unidades > 0 ? art.unidades : ''), React.createElement("td", {
+    className: "px-3 py-2 text-right"
+  }, "$", Number(art.precio || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2
+  })), React.createElement("td", {
+    className: "px-3 py-2 text-right font-bold"
+  }, "$", Number(art.subtotal || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2
+  })))), articulos.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "5",
+    className: "px-3 py-6 text-center text-slate-400"
+  }, "Este pedido no tiene artículos.")))), React.createElement("div", {
+    className: "flex justify-end"
+  }, React.createElement("div", {
+    className: "bg-blue-50 border border-blue-100 rounded-xl p-4 min-w-[220px] text-right"
+  }, React.createElement("p", {
+    className: "text-xs text-blue-700 font-bold uppercase"
+  }, "Total del Pedido"), React.createElement("p", {
+    className: "text-2xl font-black text-blue-900"
+  }, "$", Number(pedido.total || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2
+  })))), pedido.observacion && React.createElement("div", {
+    className: "mt-6 bg-slate-50 border border-slate-100 rounded-xl p-4"
+  }, React.createElement("p", {
+    className: "text-xs text-slate-400 font-bold uppercase mb-1"
+  }, "Notas"), React.createElement("p", {
+    className: "text-sm text-slate-700"
+  }, pedido.observacion)))));
+};
 const PedidosVendedorDashboard = ({
   currentUser,
   cartera,
@@ -2714,8 +2878,9 @@ const PedidosVendedorDashboard = ({
   const [pedidoStartDate, setPedidoStartDate] = useState('');
   const [pedidoEndDate, setPedidoEndDate] = useState('');
   const [filtroEstadoPedido, setFiltroEstadoPedido] = useState('ALL');
+  const [viendoDetallePedido, setViendoDetallePedido] = useState(null);
   const miCarteraBase = useMemo(() => {
-    return currentUser.rol === 'admin' || currentUser.rol === 'gerente' ? cartera : cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(currentUser.id) || (c.vendedorNombre || '').includes(currentUser.id));
+    return currentUser.rol === 'admin' || currentUser.rol === 'gerente' ? cartera : filtrarCarteraPorVendedor(cartera, currentUser.id);
   }, [cartera, currentUser]);
   const buscarDeuda = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
   const buscarEnMiCartera = useMemo(() => crearBuscadorCartera(miCarteraBase), [miCarteraBase]);
@@ -2929,7 +3094,8 @@ const PedidosVendedorDashboard = ({
   }, misPedidos.map(p => {
     return React.createElement("tr", {
       key: p.id,
-      className: "hover:bg-blue-50/30 transition-colors"
+      onClick: () => setViendoDetallePedido(p),
+      className: "hover:bg-blue-50/30 transition-colors cursor-pointer"
     }, React.createElement("td", {
       className: "px-6 py-4 text-slate-600"
     }, React.createElement("div", {
@@ -3030,7 +3196,10 @@ const PedidosVendedorDashboard = ({
     minimumFractionDigits: 2
   })))))))))), miCxcFiltrado.length === 0 && React.createElement("div", {
     className: "col-span-full py-12 text-center text-slate-400"
-  }, miCxcDetallado.length === 0 ? 'No hay cuentas por cobrar en tu ruta actualmente.' : 'Ningún cliente coincide con los filtros.'))));
+  }, miCxcDetallado.length === 0 ? 'No hay cuentas por cobrar en tu ruta actualmente.' : 'Ningún cliente coincide con los filtros.'))), viendoDetallePedido && React.createElement(DetallePedidoVendedorModal, {
+    pedido: viendoDetallePedido,
+    onClose: () => setViendoDetallePedido(null)
+  }));
 };
 const RelacionCobrosPrint = ({
   pagos,
@@ -4068,6 +4237,8 @@ const PedidosAdminPanel = ({
   };
   const defaultTab = ['pedidos', 'zonas', 'catalogo', 'cartera', 'cxc', 'usuarios'].find(hasTabAccess) || 'pedidos';
   const [activeTab, setActiveTab] = useState(defaultTab);
+  const buscarDeudaBulk = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
+  const buscarClienteCarteraBulk = useMemo(() => crearBuscadorCartera(cartera), [cartera]);
   const [managingPedido, setManagingPedido] = useState(null);
   const [selectedPedidos, setSelectedPedidos] = useState([]);
   const [showBulkPrint, setShowBulkPrint] = useState(false);
@@ -4324,11 +4495,13 @@ const PedidosAdminPanel = ({
         if (/^\d+$/.test(idC)) {
           idC = idC.padStart(6, '0');
         }
+        const cdVal = getSafeVal(row, ['Ciudad', 'CIUDAD', 'City']);
         return {
           idVendedor: idV,
           vendedorNombre: nomV,
           idCliente: idC || 'S/N',
-          cliente: cVal ? String(cVal).trim() : 'Desconocido'
+          cliente: cVal ? String(cVal).trim() : 'Desconocido',
+          ciudad: cdVal ? String(cdVal).trim().toUpperCase() : ''
         };
       }).filter(c => {
         const tieneCliente = c.cliente && c.cliente !== 'Desconocido';
@@ -4428,12 +4601,33 @@ const PedidosAdminPanel = ({
     }
     setTimeout(() => setUserSaveStatus('idle'), 3000);
   };
+  const escapeHtmlExport = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const handleDownloadCarteraActual = () => {
+    const headerHtml = `<th>Vendedor</th><th>Id Cliente</th><th>Cliente</th><th>Ciudad</th>`;
+    const rowsHtml = (cartera || []).map(c => {
+      const vendedor = escapeHtmlExport(`${c.idVendedor || ''} - ${c.vendedorNombre || ''}`.trim());
+      return `<tr><td>${vendedor}</td><td>${escapeHtmlExport(c.idCliente)}</td><td>${escapeHtmlExport(c.cliente)}</td><td>${escapeHtmlExport(c.ciudad)}</td></tr>`;
+    }).join('');
+    const tableHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+    const blob = new Blob([tableHtml], {
+      type: 'application/vnd.ms-excel'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cartera_rutas_actual_${new Date().getTime()}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
   return React.createElement("div", {
     className: "space-y-6 animate-fadeIn p-4 md:p-8 relative"
   }, managingPedido && React.createElement(GestorPedidoModal, {
     pedido: managingPedido,
     precios: precios,
     cxc: cxc,
+    cartera: cartera,
     onClose: () => setManagingPedido(null),
     db: db,
     getCollectionPath: getCollectionPath,
@@ -4530,6 +4724,8 @@ const PedidosAdminPanel = ({
       pageArticulos,
       isLastPage
     } = bloque;
+    const paddedRows = [...pageArticulos];
+    while (paddedRows.length < PDF_ITEMS_POR_SUBPAGINA) paddedRows.push(null);
     return React.createElement("div", {
       key: bloque.key,
       style: {
@@ -4691,7 +4887,10 @@ const PedidosAdminPanel = ({
         textAlign: 'center'
       },
       colSpan: 6
-    }, pedido.ciudad || '')), React.createElement("tr", {
+    }, buscarClienteCarteraBulk({
+      idCliente: pedido.clienteId,
+      clienteNombre: pedido.clienteNombre
+    })?.ciudad || pedido.ciudad || '')), React.createElement("tr", {
       style: {
         borderBottom: '1px solid #64748b',
         background: '#e2e8f0',
@@ -4740,7 +4939,7 @@ const PedidosAdminPanel = ({
       style: {
         padding: '2px 3px'
       }
-    }, "TOTAL")), pageArticulos.map((art, i) => React.createElement("tr", {
+    }, "TOTAL")), paddedRows.map((art, i) => React.createElement("tr", {
       key: i,
       style: {
         borderBottom: '1px solid #cbd5e1',
@@ -4754,7 +4953,7 @@ const PedidosAdminPanel = ({
         fontFamily: 'monospace',
         overflow: 'hidden'
       }
-    }, art.sku), React.createElement("td", {
+    }, art ? art.sku : ''), React.createElement("td", {
       style: {
         borderRight: '1px solid #cbd5e1',
         padding: '1px 3px',
@@ -4764,26 +4963,26 @@ const PedidosAdminPanel = ({
         textOverflow: 'ellipsis'
       },
       colSpan: 2
-    }, (art.sinPrecio ? '\u26a0 ' : '') + art.nombre + (art.sinPrecio && art.nota ? ' (' + art.nota + ')' : '')), React.createElement("td", {
+    }, art ? (art.sinPrecio ? '\u26a0 ' : '') + art.nombre + (art.sinPrecio && art.nota ? ' (' + art.nota + ')' : '') : '\u00a0'), React.createElement("td", {
       style: {
         borderRight: '1px solid #cbd5e1',
         padding: '1px 3px',
         textAlign: 'center'
       }
-    }, art.cajas > 0 ? art.cajas : ''), React.createElement("td", {
+    }, art && art.cajas > 0 ? art.cajas : ''), React.createElement("td", {
       style: {
         borderRight: '1px solid #cbd5e1',
         padding: '1px 3px',
         textAlign: 'center'
       }
-    }, art.unidades > 0 ? art.unidades : ''), React.createElement("td", {
+    }, art && art.unidades > 0 ? art.unidades : ''), React.createElement("td", {
       style: {
         borderRight: '1px solid #cbd5e1',
         padding: '1px 3px',
         textAlign: 'right'
       },
       colSpan: 2
-    }, art.precioCaja > 0 || art.precioUnd > 0 || art.precio > 0 ? `$${Number(art.precioCaja > 0 && art.cajas > 0 && !art.unidades ? art.precioCaja : art.precioUnd > 0 && art.unidades > 0 && !art.cajas ? art.precioUnd : art.precio).toLocaleString(undefined, {
+    }, art && (art.precioCaja > 0 || art.precioUnd > 0 || art.precio > 0) ? `$${Number(art.precioCaja > 0 && art.cajas > 0 && !art.unidades ? art.precioCaja : art.precioUnd > 0 && art.unidades > 0 && !art.cajas ? art.precioUnd : art.precio).toLocaleString(undefined, {
       minimumFractionDigits: 2
     })}` : ''), React.createElement("td", {
       style: {
@@ -4795,7 +4994,7 @@ const PedidosAdminPanel = ({
         textTransform: 'uppercase',
         overflow: 'hidden'
       }
-    }, art.listaAplicada ? art.listaAplicada.length > 8 ? art.listaAplicada.substring(0, 8) + '.' : art.listaAplicada : ''), React.createElement("td", {
+    }, art && art.listaAplicada ? art.listaAplicada.length > 8 ? art.listaAplicada.substring(0, 8) + '.' : art.listaAplicada : ''), React.createElement("td", {
       style: {
         borderRight: '1px solid #cbd5e1',
         padding: '1px 3px',
@@ -4803,17 +5002,17 @@ const PedidosAdminPanel = ({
         color: '#ea580c',
         fontWeight: 700
       }
-    }, art.descuento > 0 ? `${art.descuento}%` : ''), React.createElement("td", {
+    }, art && art.descuento > 0 ? `${art.descuento}%` : ''), React.createElement("td", {
       style: {
         padding: '1px 3px',
         textAlign: 'right',
         fontWeight: 700
       }
-    }, art.subtotal > 0 ? '$' + Number(art.subtotal).toLocaleString(undefined, {
+    }, art ? art.subtotal > 0 ? '$' + Number(art.subtotal).toLocaleString(undefined, {
       minimumFractionDigits: 2
     }) : art.precio > 0 && art.cantidad > 0 ? '$' + Number(art.precio * art.cantidad).toLocaleString(undefined, {
       minimumFractionDigits: 2
-    }) : '-'))), React.createElement("tr", {
+    }) : '-' : ''))), React.createElement("tr", {
       style: {
         borderBottom: '1px solid #64748b',
         borderTop: '1px solid #64748b',
@@ -4901,7 +5100,10 @@ const PedidosAdminPanel = ({
       },
       colSpan: 3
     }, (() => {
-      const d = deudaDePedido(cxc, pedido);
+      const d = buscarDeudaBulk({
+        idCliente: pedido.clienteId,
+        cliente: pedido.clienteNombre
+      });
       const monto = d ? Number(d.deuda) || 0 : 0;
       if (monto <= 0) return React.createElement("span", {
         style: {
@@ -5515,14 +5717,21 @@ const PedidosAdminPanel = ({
   }, "Mostrando los primeros 100 de ", cxcFiltradoAdmin.length, ". Usa los filtros para acotar la búsqueda."))), activeTab === 'cartera' && React.createElement("div", {
     className: "bg-white p-8 rounded-2xl shadow-sm border border-slate-100"
   }, React.createElement("div", {
-    className: "flex justify-between items-center mb-6 border-b border-slate-100 pb-6"
+    className: "flex flex-wrap justify-between items-center gap-3 mb-6 border-b border-slate-100 pb-6"
   }, React.createElement("div", null, React.createElement("h2", {
     className: "text-xl font-black text-blue-900 flex items-center gap-3"
   }, React.createElement(MapPin, {
     className: "text-orange-500"
   }), " Rutas de Vendedores"), React.createElement("p", {
     className: "text-slate-500 text-sm font-medium mt-1"
-  }, "Sincroniza el listado de clientes asignados a cada vendedor."))), React.createElement("div", {
+  }, "Sincroniza el listado de clientes asignados a cada vendedor.")), React.createElement("button", {
+    onClick: handleDownloadCarteraActual,
+    disabled: !cartera || cartera.length === 0,
+    className: "bg-white border-2 border-blue-200 text-blue-700 hover:border-blue-300 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm flex items-center gap-2",
+    title: "Descargar lo que está cargado ahora mismo en la cartera"
+  }, React.createElement(Download, {
+    size: 18
+  }), " Descargar Cartera Actual")), React.createElement("div", {
     className: "border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center hover:bg-blue-50/50 hover:border-blue-300 transition-all flex flex-col justify-center items-center max-w-xl mx-auto"
   }, React.createElement(Upload, {
     className: "mx-auto h-12 w-12 text-slate-400 mb-3"
@@ -5530,7 +5739,7 @@ const PedidosAdminPanel = ({
     className: "text-base font-bold text-slate-700 mb-1"
   }, "Cargar Rutas"), React.createElement("p", {
     className: "text-[11px] text-slate-500 mb-5 leading-relaxed"
-  }, "Columnas requeridas: ", React.createElement("strong", null, "VENDEDOR, CLIENTE")), React.createElement("div", {
+  }, "Columnas requeridas: ", React.createElement("strong", null, "VENDEDOR, CLIENTE"), " (opcional: ", React.createElement("strong", null, "Ciudad"), ")"), React.createElement("div", {
     className: "w-full flex flex-col gap-2"
   }, React.createElement("input", {
     type: "file",
@@ -8313,7 +8522,7 @@ const VentasVendedorDashboard = ({
   const [filtroEstadoCliente, setFiltroEstadoCliente] = useState('todos');
   const [subTabCartera, setSubTabCartera] = useState('resumen');
   const normUserId = normalizeId(userId);
-  const miCarteraPropia = useMemo(() => cartera.filter(c => normalizeId(c.idVendedor) === normUserId || (c.vendedorNombre || '').includes(userId)), [cartera, normUserId, userId]);
+  const miCarteraPropia = useMemo(() => filtrarCarteraPorVendedor(cartera, userId), [cartera, userId]);
   const currentMonthStr = useMemo(() => {
     const cmSales = sales.filter(s => s.source === 'currMonth');
     return getLatestMonthStr(cmSales.length > 0 ? cmSales : sales);
@@ -8441,11 +8650,7 @@ const VentasVendedorDashboard = ({
     };
   }, [sales, normUserId, userId, searchCliente, searchProducto, searchGrupo, currentMonthStr]);
   const carteraConEstado = useMemo(() => {
-    let list = cartera.filter(c => {
-      const vid = normalizeId(c.idVendedor);
-      const vname = String(c.vendedorNombre || "").toUpperCase();
-      return vid === normUserId || vname.includes(String(userId).toUpperCase()) || vname.includes(normUserId.toUpperCase());
-    });
+    let list = filtrarCarteraPorVendedor(cartera, userId);
     let listConEstado = list.map(c => ({
       ...c,
       activo: stats.nombresClientesActivos.has(normalizeName(c.cliente))
@@ -11187,21 +11392,25 @@ const GerenteDashboard = ({
   const [selectedVendedorCartera, setSelectedVendedorCartera] = useState('');
   const [subTabCartera, setSubTabCartera] = useState('resumen');
   const [searchCliente, setSearchCliente] = useState('');
+  const [filtroSupervisorAdmin, setFiltroSupervisorAdmin] = useState('');
   const currentMonthStr = useMemo(() => {
     const cmSales = sales.filter(s => s.source === 'currMonth');
     return getLatestMonthStr(cmSales.length > 0 ? cmSales : sales);
   }, [sales]);
+  const supervisoresDisponibles = useMemo(() => users.filter(u => u.rol === 'gerente'), [users]);
   const myTeam = useMemo(() => {
     const isAdmin = currentUser?.rol === 'admin';
     if (isAdmin) {
-      return users.filter(u => u.rol === 'vendedor');
+      if (!filtroSupervisorAdmin) return users.filter(u => u.rol === 'vendedor');
+      const subSupervisoresIds = users.filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(filtroSupervisorAdmin)).map(u => normalizeId(u.id));
+      return users.filter(u => u.rol === 'vendedor' && (normalizeId(u.supervisor) === normalizeId(filtroSupervisorAdmin) || subSupervisoresIds.includes(normalizeId(u.supervisor))));
     }
     const supervisoresIds = users.filter(u => u.rol === 'gerente' && normalizeId(u.supervisor) === normalizeId(userId)).map(u => normalizeId(u.id));
     return users.filter(u => u.rol === 'vendedor' && (normalizeId(u.supervisor) === normalizeId(userId) || supervisoresIds.includes(normalizeId(u.supervisor))));
-  }, [users, userId, currentUser]);
+  }, [users, userId, currentUser, filtroSupervisorAdmin]);
   const myTeamIds = useMemo(() => myTeam.map(u => normalizeId(u.id)), [myTeam]);
   const teamSales = useMemo(() => sales.filter(s => myTeamIds.includes(normalizeId(s.idVendedor))), [sales, myTeamIds]);
-  const teamCartera = useMemo(() => (cartera || []).filter(c => myTeamIds.includes(normalizeId(c.idVendedor)) || c.vendedorNombre && myTeam.some(u => c.vendedorNombre.includes(u.id))), [cartera, myTeam, myTeamIds]);
+  const teamCartera = useMemo(() => filtrarCarteraPorEquipo(cartera, myTeamIds, myTeam), [cartera, myTeam, myTeamIds]);
   const teamCxc = useMemo(() => {
     if (!cxc || !cartera) return [];
     const buscar = crearBuscadorCartera(teamCartera);
@@ -11220,9 +11429,9 @@ const GerenteDashboard = ({
     };
     let filteredCartera = cartera;
     if (selectedVendedorCartera) {
-      filteredCartera = cartera.filter(c => normalizeId(c.idVendedor) === normalizeId(selectedVendedorCartera) || c.vendedorNombre && c.vendedorNombre.includes(selectedVendedorCartera));
+      filteredCartera = filtrarCarteraPorVendedor(cartera, selectedVendedorCartera);
     } else {
-      filteredCartera = cartera.filter(c => myTeamIds.includes(normalizeId(c.idVendedor)) || c.vendedorNombre && myTeam.some(u => c.vendedorNombre.includes(u.id)));
+      filteredCartera = filtrarCarteraPorEquipo(cartera, myTeamIds, myTeam);
     }
     if (searchCliente) {
       const searchLower = searchCliente.toLowerCase();
@@ -11230,7 +11439,12 @@ const GerenteDashboard = ({
     }
     const currentSales = sales.filter(s => s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr));
     const clientsProcessed = filteredCartera.map(c => {
-      const compras = currentSales.filter(s => s.idCliente === c.idCliente || s.cliente === c.cliente || s.rawCliente && s.rawCliente === c.cliente);
+      const codC = normalizeId(c.idCliente);
+      const compras = currentSales.filter(s => {
+        const codS = normalizeId(s.idCliente);
+        if (codC && codS) return codC === codS;
+        return s.cliente === c.cliente || s.rawCliente && s.rawCliente === c.cliente;
+      });
       const montoTotal = compras.reduce((sum, s) => sum + s.monto, 0);
       const lastCompra = compras.length > 0 ? compras.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0].fecha : null;
       return {
@@ -11453,14 +11667,28 @@ const GerenteDashboard = ({
   }), " Gestión de Cartera")), activeTab === 'dashboard' && React.createElement("div", {
     className: "space-y-6 animate-fadeIn"
   }, React.createElement("div", {
-    className: "bg-gradient-to-r from-purple-800 to-indigo-700 p-4 rounded-2xl shadow-sm text-white flex justify-between items-center"
+    className: "bg-gradient-to-r from-purple-800 to-indigo-700 p-4 rounded-2xl shadow-sm text-white flex flex-wrap justify-between items-center gap-3"
   }, React.createElement("h2", {
     className: "font-black text-lg flex items-center gap-2"
   }, React.createElement(LayoutDashboard, {
     className: "text-orange-400"
-  }), " Rendimiento de Mi Equipo"), React.createElement("span", {
+  }), " Rendimiento de Mi Equipo"), React.createElement("div", {
+    className: "flex flex-wrap items-center gap-3"
+  }, currentUser?.rol === 'admin' && React.createElement("select", {
+    value: filtroSupervisorAdmin,
+    onChange: e => setFiltroSupervisorAdmin(e.target.value),
+    className: "bg-purple-900/50 border border-purple-600 text-white text-xs font-bold rounded-full px-4 py-1.5 outline-none cursor-pointer",
+    title: "Ver solo el equipo de un supervisor puntual"
+  }, React.createElement("option", {
+    value: "",
+    className: "text-slate-800"
+  }, "Todos los supervisores"), supervisoresDisponibles.map(s => React.createElement("option", {
+    key: s.id,
+    value: s.id,
+    className: "text-slate-800"
+  }, s.nombre))), React.createElement("span", {
     className: "bg-purple-900/50 px-4 py-1.5 rounded-full text-xs font-bold border border-purple-600"
-  }, "Mes en Curso: ", formatMonthStr(currentMonthStr))), React.createElement(TopKPIsBar, {
+  }, "Mes en Curso: ", formatMonthStr(currentMonthStr)))), React.createElement(TopKPIsBar, {
     stats: teamStats,
     meta: metaGlobal
   }), React.createElement("div", {
