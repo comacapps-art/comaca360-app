@@ -1265,14 +1265,15 @@ const GestorPedidoModal = ({
   }, React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col print-scroll-reset"
   }, React.createElement("div", {
-    className: "p-6 border-b border-slate-200 flex justify-between items-center shrink-0 bg-white rounded-t-2xl print-hide"
+    className: "p-4 sm:p-6 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white rounded-t-2xl print-hide"
   }, React.createElement("h2", {
-    className: "text-xl font-black text-blue-900 flex items-center gap-2"
+    className: "text-lg sm:text-xl font-black text-blue-900 flex items-center gap-2"
   }, React.createElement(FileText, {
-    className: "text-orange-500"
+    className: "text-orange-500 shrink-0",
+    size: 20
   }), " Gestión de Pedido"), React.createElement("button", {
     onClick: onClose,
-    className: "p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+    className: "p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors shrink-0"
   }, React.createElement(X, {
     size: 20
   }))), React.createElement("div", {
@@ -1304,7 +1305,7 @@ const GestorPedidoModal = ({
     className: "text-xs font-medium"
   }, "Asigna una lista válida o no podrás aprobar el pedido.")))), React.createElement("div", {
     id: "ticket-to-print",
-    className: "p-8 flex-1 overflow-y-auto bg-white print-scroll-reset"
+    className: "p-4 sm:p-8 flex-1 overflow-y-auto bg-white print-scroll-reset"
   }, React.createElement("div", {
     className: "border-b-2 border-slate-800 pb-6 mb-6"
   }, React.createElement("div", {
@@ -1403,7 +1404,9 @@ const GestorPedidoModal = ({
     className: "py-2 px-2 text-right font-black text-red-600"
   }, "$", Number(fac.saldo).toLocaleString(undefined, {
     minimumFractionDigits: 2
-  })))))))), React.createElement("table", {
+  })))))))), React.createElement("div", {
+    className: "overflow-x-auto"
+  }, React.createElement("table", {
     className: "w-full text-sm text-left mb-6"
   }, React.createElement("thead", {
     className: "border-b-2 border-slate-200 text-slate-500 uppercase text-[10px] font-black tracking-wider"
@@ -1483,7 +1486,7 @@ const GestorPedidoModal = ({
     className: "py-4 px-2 text-right text-2xl font-black text-orange-600"
   }, "$", Number(total || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2
-  })))))), React.createElement("div", {
+  }))))))), React.createElement("div", {
     className: "p-6 bg-white border-t border-slate-200 flex flex-wrap justify-between items-center gap-4 shrink-0 rounded-b-2xl print-hide"
   }, React.createElement("button", {
     onClick: handlePrint,
@@ -1527,6 +1530,49 @@ const TomaPedidosView = ({
   const [observacion, setObservacion] = useState('');
   const [showDebtDetail, setShowDebtDetail] = useState(false);
   const [itemLists, setItemLists] = useState({});
+  const draftKey = useMemo(() => `pedido_borrador_${normalizeId(currentUser.id)}_${normalizeId(client.idCliente) || client.cliente}`, [currentUser.id, client]);
+  const [draftRestaurado, setDraftRestaurado] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
+          setCart(draft.cart);
+          setObservacion(draft.observacion || '');
+          setItemLists(draft.itemLists || {});
+          setDraftRestaurado(true);
+        }
+      }
+    } catch (e) {
+      console.error('No se pudo restaurar el borrador del pedido', e);
+    }
+  }, [draftKey]);
+  useEffect(() => {
+    try {
+      if (cart.length > 0) {
+        localStorage.setItem(draftKey, JSON.stringify({
+          cart,
+          observacion,
+          itemLists,
+          guardadoEn: new Date().toISOString()
+        }));
+      } else {
+        localStorage.removeItem(draftKey);
+      }
+    } catch (e) {
+      console.error('No se pudo guardar el borrador del pedido', e);
+    }
+  }, [cart, observacion, itemLists, draftKey]);
+  const descartarBorrador = () => {
+    try {
+      localStorage.removeItem(draftKey);
+    } catch (e) {}
+    setCart([]);
+    setObservacion('');
+    setItemLists({});
+    setDraftRestaurado(false);
+  };
   const buscarDeudaDetalle = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
   const listasDisponibles = useMemo(() => [...new Set(precios.map(p => p.lista).filter(Boolean))], [precios]);
   const listasPermitidas = useMemo(() => {
@@ -1766,6 +1812,9 @@ const TomaPedidosView = ({
         observacion: observacion
       };
       await addDoc(collection(db, getCollectionPath('pedidos')), pedido);
+      try {
+        localStorage.removeItem(draftKey);
+      } catch (e) {}
       openModal('alert', null, 'Éxito', 'El pedido ha sido registrado y enviado al administrador exitosamente.', true);
       goBack();
     } catch (err) {
@@ -1778,7 +1827,17 @@ const TomaPedidosView = ({
   };
   return React.createElement("div", {
     className: "animate-fadeIn h-full flex flex-col bg-slate-50 relative"
-  }, client.deuda > 0 && React.createElement("div", {
+  }, draftRestaurado && React.createElement("div", {
+    className: "bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center flex-wrap gap-2 text-blue-700 print-hide z-10 relative"
+  }, React.createElement(Save, {
+    size: 16,
+    className: "shrink-0"
+  }), React.createElement("span", {
+    className: "text-xs font-bold uppercase tracking-wide"
+  }, "Se recuperó un pedido sin enviar de este cliente."), React.createElement("button", {
+    onClick: descartarBorrador,
+    className: "ml-auto bg-blue-100 hover:bg-blue-200 text-blue-800 text-[10px] font-black px-3 py-1 rounded-full transition-colors uppercase"
+  }, "Descartar y empezar de nuevo")), client.deuda > 0 && React.createElement("div", {
     className: "bg-red-50 border-b border-red-200 px-4 py-2 flex items-center flex-wrap gap-2 text-red-700 print-hide z-10 relative"
   }, React.createElement(AlertCircle, {
     size: 16,
@@ -2754,27 +2813,30 @@ const DetallePedidoVendedorModal = ({
   }, React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col print-scroll-reset"
   }, React.createElement("div", {
-    className: "p-6 border-b border-slate-200 flex justify-between items-center shrink-0 bg-white rounded-t-2xl print-hide"
+    className: "p-4 sm:p-6 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0 bg-white rounded-t-2xl print-hide"
   }, React.createElement("h2", {
-    className: "text-xl font-black text-blue-900 flex items-center gap-2"
+    className: "text-lg sm:text-xl font-black text-blue-900 flex items-center gap-2"
   }, React.createElement(FileText, {
-    className: "text-orange-500"
+    className: "text-orange-500 shrink-0",
+    size: 20
   }), " Detalle del Pedido"), React.createElement("div", {
-    className: "flex items-center gap-2"
+    className: "flex items-center gap-2 shrink-0"
   }, React.createElement("button", {
     onClick: handlePrint,
     disabled: isPrinting,
-    className: "px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold rounded-xl flex items-center gap-2 transition-colors shadow-sm text-sm"
+    className: "px-3 sm:px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold rounded-xl flex items-center gap-2 transition-colors shadow-sm text-sm"
   }, isPrinting ? 'Generando...' : React.createElement(React.Fragment, null, React.createElement(Printer, {
     size: 16
-  }), " Imprimir")), React.createElement("button", {
+  }), " ", React.createElement("span", {
+    className: "hidden sm:inline"
+  }, "Imprimir"))), React.createElement("button", {
     onClick: onClose,
-    className: "p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+    className: "p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors shrink-0"
   }, React.createElement(X, {
     size: 20
   })))), React.createElement("div", {
     id: "detalle-pedido-vendedor-print",
-    className: "p-8 flex-1 overflow-y-auto bg-white print-scroll-reset"
+    className: "p-4 sm:p-8 flex-1 overflow-y-auto bg-white print-scroll-reset"
   }, React.createElement("div", {
     className: "border-b-2 border-slate-800 pb-6 mb-6"
   }, React.createElement("div", {
@@ -2806,7 +2868,9 @@ const DetallePedidoVendedorModal = ({
   }, React.createElement(MapPin, {
     size: 14,
     className: "inline mr-1 text-orange-500"
-  }), pedido.ciudad))), React.createElement("table", {
+  }), pedido.ciudad))), React.createElement("div", {
+    className: "overflow-x-auto"
+  }, React.createElement("table", {
     className: "w-full text-sm text-left mb-6"
   }, React.createElement("thead", {
     className: "bg-slate-50 text-slate-500 text-[10px] uppercase font-black"
@@ -2841,7 +2905,7 @@ const DetallePedidoVendedorModal = ({
   })))), articulos.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: "5",
     className: "px-3 py-6 text-center text-slate-400"
-  }, "Este pedido no tiene artículos.")))), React.createElement("div", {
+  }, "Este pedido no tiene artículos."))))), React.createElement("div", {
     className: "flex justify-end"
   }, React.createElement("div", {
     className: "bg-blue-50 border border-blue-100 rounded-xl p-4 min-w-[220px] text-right"
@@ -5335,7 +5399,7 @@ const PedidosAdminPanel = ({
       title: "Gestionar / Auditar"
     }, React.createElement(Edit2, {
       size: 16
-    })), currentUser?.rol === 'admin' && React.createElement("button", {
+    })), currentUser?.rol === 'admin' && (!currentUser?.permisos || currentUser.permisos.length === 0) && React.createElement("button", {
       onClick: () => openModal('deletePedido', p.id, 'Eliminar Pedido', '¿Eliminar este pedido del sistema?'),
       className: "text-red-500 hover:text-white hover:bg-red-600 p-2 bg-red-50 rounded-lg transition-colors",
       title: "Eliminar"
