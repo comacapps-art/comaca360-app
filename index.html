@@ -850,7 +850,7 @@ const rutaDePago = p => {
   return nom || id || 'Sin ruta';
 };
 const filasRelacionCobros = pagos => {
-  return (pagos || []).map(p => {
+  const filas = (pagos || []).map(p => {
     const nums = (p.facturas || []).map(f => f.numero).filter(Boolean);
     const esBs = p.moneda === 'VES';
     return {
@@ -862,13 +862,15 @@ const filasRelacionCobros = pagos => {
       monto: p.montoUsd === null || p.montoUsd === undefined ? null : Number(p.montoUsd) || 0,
       bs: esBs ? Number(p.montoOriginal) || 0 : null,
       tasa: esBs ? Number(p.tasa) || 0 : null,
-      fecha: p.fechaPago || '',
+      fecha: p.fechaReporte || '',
+      fechaPago: p.fechaPago || '',
       observacion: p.observacion || '',
       vendedorId: p.vendedorId || '',
       vendedor: p.vendedorNombre || '',
       ruta: rutaDePago(p)
     };
   });
+  return filas.sort((a, b) => safeGetTime(a.fecha) - safeGetTime(b.fecha));
 };
 const agruparPorRuta = filas => {
   const mapa = new Map();
@@ -3399,7 +3401,7 @@ const RelacionCobrosPrint = ({
     }
   }, "Monto"), React.createElement("th", {
     style: th
-  }, "Fecha"), React.createElement("th", {
+  }, "Fecha Carga"), React.createElement("th", {
     style: th
   }, "Observacion"))), React.createElement("tbody", null, grupos.map((g, gi) => React.createElement(React.Fragment, {
     key: gi
@@ -3471,7 +3473,18 @@ const RelacionCobrosPrint = ({
     }
   }, f.monto !== null ? `$${money(f.monto)} @ ${money(f.tasa)}` : 'sin tasa')) : `$${money(f.monto || 0)}`), React.createElement("td", {
     style: td
-  }, f.fecha), React.createElement("td", {
+  }, React.createElement("div", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, safeFormatDate(f.fecha) || '-'), f.fechaPago && React.createElement("div", {
+    style: {
+      fontWeight: 400,
+      fontSize: '7px',
+      color: '#475569',
+      whiteSpace: 'nowrap'
+    }
+  }, "Pagó: ", safeFormatDate(f.fechaPago))), React.createElement("td", {
     style: {
       ...td,
       fontSize: '8px'
@@ -3738,6 +3751,10 @@ const PagosAdminPanel = ({
         unit: 'in',
         format: 'letter',
         orientation: 'landscape'
+      },
+      pagebreak: {
+        mode: ['css', 'legacy'],
+        avoid: 'tr'
       }
     };
     window.html2pdf().set(opt).from(element).save().then(() => setIsPrinting(false)).catch(err => {
@@ -13047,12 +13064,14 @@ function App() {
         id: d.id
       }));
       if (dbUsers.length === 0) {
-        const seedDatabase = async () => {
-          const batch = writeBatch(db);
-          initialUsersDB.forEach(u => batch.set(doc(db, getCollectionPath('users'), u.id), u));
-          await batch.commit();
-        };
-        seedDatabase();
+        if (!snap.metadata.fromCache) {
+          const seedDatabase = async () => {
+            const batch = writeBatch(db);
+            initialUsersDB.forEach(u => batch.set(doc(db, getCollectionPath('users'), u.id), u));
+            await batch.commit();
+          };
+          seedDatabase();
+        }
       } else {
         setUsers(dbUsers);
         if (currentUser) {
