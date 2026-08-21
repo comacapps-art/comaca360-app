@@ -134,7 +134,7 @@ import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferred
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField } from 'firebase/firestore';
 import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
@@ -2738,7 +2738,7 @@ const PagosVendedorView = ({
     estado: p.estado
   }), React.createElement("span", {
     className: "text-[11px] font-bold text-slate-400"
-  }, safeFormatDate(p.fechaReporte))), React.createElement("h4", {
+  }, safeFormatDate(p.fechaReporte), " ", safeFormatTime(p.fechaReporte))), React.createElement("h4", {
     className: "font-black text-slate-800 text-sm truncate"
   }, p.clienteNombre), React.createElement("p", {
     className: "text-[11px] text-slate-500 font-medium mt-0.5"
@@ -3477,7 +3477,7 @@ const RelacionCobrosPrint = ({
     style: {
       whiteSpace: 'nowrap'
     }
-  }, safeFormatDate(f.fecha) || '-'), f.fechaPago && React.createElement("div", {
+  }, safeFormatDate(f.fecha), " ", safeFormatTime(f.fecha)), f.fechaPago && React.createElement("div", {
     style: {
       fontWeight: 400,
       fontSize: '7px',
@@ -3734,7 +3734,13 @@ const PagosAdminPanel = ({
       return;
     }
     setIsPrinting(true);
-    const element = document.getElementById('relacion-cobros-print');
+    const source = document.getElementById('relacion-cobros-print');
+    const holder = document.createElement('div');
+    holder.style.cssText = 'width:1100px; background:#fff;';
+    holder.appendChild(source.cloneNode(true));
+    document.body.appendChild(holder);
+    const element = holder;
+    const restoreBoxes = () => holder.remove();
     const opt = {
       margin: 0.4,
       filename: `Relacion_Cobros_${new Date().toISOString().slice(0, 10)}.pdf`,
@@ -3761,7 +3767,7 @@ const PagosAdminPanel = ({
       console.error(err);
       setIsPrinting(false);
       openModal('alert', null, 'Error', 'No se pudo generar el PDF.', true);
-    });
+    }).finally(restoreBoxes);
   };
   const hayFiltro = busqueda || filtroVendedor !== 'ALL' || desde || hasta || filtroEstado !== 'Pendiente';
   return React.createElement("div", {
@@ -3928,7 +3934,9 @@ const PagosAdminPanel = ({
         estado: estado
       }), React.createElement("span", {
         className: "text-[11px] font-bold text-slate-500"
-      }, p.vendedorNombre)), React.createElement("h4", {
+      }, p.vendedorNombre), React.createElement("span", {
+        className: "text-[11px] font-bold text-slate-400"
+      }, "Enviado ", safeFormatDate(p.fechaReporte), " ", safeFormatTime(p.fechaReporte))), React.createElement("h4", {
         className: "font-black text-slate-800 text-sm truncate"
       }, React.createElement("span", {
         className: "font-mono text-slate-400 mr-1"
@@ -13066,9 +13074,19 @@ function App() {
       if (dbUsers.length === 0) {
         if (!snap.metadata.fromCache) {
           const seedDatabase = async () => {
-            const batch = writeBatch(db);
-            initialUsersDB.forEach(u => batch.set(doc(db, getCollectionPath('users'), u.id), u));
-            await batch.commit();
+            try {
+              const seedFlagRef = doc(db, getCollectionPath('config'), 'seed');
+              const seedSnap = await getDoc(seedFlagRef);
+              if (seedSnap.exists()) return;
+              const batch = writeBatch(db);
+              initialUsersDB.forEach(u => batch.set(doc(db, getCollectionPath('users'), u.id), u));
+              batch.set(seedFlagRef, {
+                seededAt: new Date().toISOString()
+              });
+              await batch.commit();
+            } catch (err) {
+              console.error('Error al sembrar usuarios iniciales', err);
+            }
           };
           seedDatabase();
         }
