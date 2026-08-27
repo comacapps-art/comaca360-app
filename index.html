@@ -3740,7 +3740,15 @@ const PagosAdminPanel = ({
     holder.appendChild(source.cloneNode(true));
     document.body.appendChild(holder);
     const element = holder;
-    const restoreBoxes = () => holder.remove();
+    const prevHtmlOverflowX = document.documentElement.style.overflowX;
+    const prevBodyOverflowX = document.body.style.overflowX;
+    document.documentElement.style.overflowX = 'hidden';
+    document.body.style.overflowX = 'hidden';
+    const restoreBoxes = () => {
+      holder.remove();
+      document.documentElement.style.overflowX = prevHtmlOverflowX;
+      document.body.style.overflowX = prevBodyOverflowX;
+    };
     const opt = {
       margin: 0.4,
       filename: `Relacion_Cobros_${new Date().toISOString().slice(0, 10)}.pdf`,
@@ -3752,8 +3760,7 @@ const PagosAdminPanel = ({
         scale: 2,
         useCORS: true,
         logging: false,
-        width: holder.offsetWidth,
-        windowWidth: holder.offsetWidth + 40
+        width: holder.offsetWidth
       },
       jsPDF: {
         unit: 'in',
