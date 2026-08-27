@@ -3751,7 +3751,9 @@ const PagosAdminPanel = ({
       html2canvas: {
         scale: 2,
         useCORS: true,
-        logging: false
+        logging: false,
+        width: holder.offsetWidth,
+        windowWidth: holder.offsetWidth + 40
       },
       jsPDF: {
         unit: 'in',
