@@ -134,7 +134,7 @@ import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferred
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField, waitForPendingWrites } from 'firebase/firestore';
 import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
@@ -328,6 +328,11 @@ const safeGetTime = dateStr => {
 const chunkArray = (arr, size) => Array.from({
   length: Math.ceil(arr.length / size)
 }, (v, i) => arr.slice(i * size, i * size + size));
+const esperarConfirmacionServidor = async (db, timeoutMs = 12000) => {
+  const timeout = new Promise(resolve => setTimeout(() => resolve(false), timeoutMs));
+  const confirmado = waitForPendingWrites(db).then(() => true);
+  return Promise.race([confirmado, timeout]);
+};
 const indexarPrecios = precios => {
   const porSku = new Map();
   const primeroPorSku = new Map();
@@ -2438,7 +2443,12 @@ const PagosVendedorView = ({
       await addDoc(collection(db, getCollectionPath('pagos')), pago);
       limpiar();
       setActiveTab('historial');
-      openModal('alert', null, 'Pago reportado', 'El pago quedó registrado como Pendiente. Podrás seguir su estado en tu historial.', true);
+      const confirmado = await esperarConfirmacionServidor(db);
+      if (confirmado) {
+        openModal('alert', null, 'Pago reportado', 'Confirmado: el pago ya llegó a Administración y quedó registrado como Pendiente.', true);
+      } else {
+        openModal('alert', null, 'Guardado, enviando…', 'El pago quedó guardado en este dispositivo, pero por señal débil aún NO se confirma que haya llegado a Administración. No lo vuelvas a reportar: déjate la app abierta (o ábrela de nuevo más tarde) con datos o wifi hasta que se envíe. Lo verás en tu historial cuando esté confirmado.', true);
+      }
     } catch (err) {
       console.error('Error al reportar pago', err);
       openModal('alert', null, 'Error', 'No se pudo reportar el pago. Verifica tu conexión e intenta de nuevo.', true);
@@ -2738,7 +2748,9 @@ const PagosVendedorView = ({
     estado: p.estado
   }), React.createElement("span", {
     className: "text-[11px] font-bold text-slate-400"
-  }, safeFormatDate(p.fechaReporte), " ", safeFormatTime(p.fechaReporte))), React.createElement("h4", {
+  }, safeFormatDate(p.fechaReporte), " ", safeFormatTime(p.fechaReporte)), p._pendienteEnviar && React.createElement("span", {
+    className: "text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5"
+  }, "Enviando… aún no confirma Administración")), React.createElement("h4", {
     className: "font-black text-slate-800 text-sm truncate"
   }, p.clienteNombre), React.createElement("p", {
     className: "text-[11px] text-slate-500 font-medium mt-0.5"
@@ -3299,6 +3311,8 @@ const RelacionCobrosPrint = ({
       width: '100%'
     }
   }, React.createElement("div", {
+    id: "rc-pageheader"
+  }, React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -3346,7 +3360,8 @@ const RelacionCobrosPrint = ({
       letterSpacing: '0.02em',
       marginBottom: '10px'
     }
-  }, titulo || 'RELACION DIARIA DE COBROS'), React.createElement("table", {
+  }, titulo || 'RELACION DIARIA DE COBROS')), React.createElement("table", {
+    id: "rc-tabla",
     style: {
       width: '100%',
       borderCollapse: 'collapse',
@@ -3354,31 +3369,35 @@ const RelacionCobrosPrint = ({
     }
   }, React.createElement("colgroup", null, React.createElement("col", {
     style: {
+      width: '7%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '20%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '10%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '12%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '12%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '9%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '9%'
+    }
+  }), React.createElement("col", {
+    style: {
       width: '8%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '22%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '11%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '13%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '13%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '10%'
-    }
-  }), React.createElement("col", {
-    style: {
-      width: '10%'
     }
   }), React.createElement("col", {
     style: {
@@ -3403,6 +3422,8 @@ const RelacionCobrosPrint = ({
     style: th
   }, "Fecha Carga"), React.createElement("th", {
     style: th
+  }, "Fecha Pago"), React.createElement("th", {
+    style: th
   }, "Observacion"))), React.createElement("tbody", null, grupos.map((g, gi) => React.createElement(React.Fragment, {
     key: gi
   }, React.createElement("tr", null, React.createElement("td", {
@@ -3424,7 +3445,7 @@ const RelacionCobrosPrint = ({
       fontSize: '8px',
       textAlign: 'right'
     },
-    colSpan: "2"
+    colSpan: "3"
   }, g.filas.length, " pago", g.filas.length === 1 ? '' : 's')), g.filas.map((f, i) => React.createElement("tr", {
     key: i
   }, React.createElement("td", {
@@ -3477,14 +3498,16 @@ const RelacionCobrosPrint = ({
     style: {
       whiteSpace: 'nowrap'
     }
-  }, safeFormatDate(f.fecha), " ", safeFormatTime(f.fecha)), f.fechaPago && React.createElement("div", {
+  }, safeFormatDate(f.fecha)), React.createElement("div", {
     style: {
       fontWeight: 400,
       fontSize: '7px',
       color: '#475569',
       whiteSpace: 'nowrap'
     }
-  }, "Pagó: ", safeFormatDate(f.fechaPago))), React.createElement("td", {
+  }, safeFormatTime(f.fecha))), React.createElement("td", {
+    style: td
+  }, f.fechaPago ? safeFormatDate(f.fechaPago) : '-'), React.createElement("td", {
     style: {
       ...td,
       fontSize: '8px'
@@ -3521,14 +3544,14 @@ const RelacionCobrosPrint = ({
       ...td,
       background: '#f1f5f9'
     },
-    colSpan: "2"
+    colSpan: "3"
   })))), filas.length === 0 && React.createElement("tr", null, React.createElement("td", {
     style: {
       ...td,
       textAlign: 'center',
       padding: '24px'
     },
-    colSpan: "8"
+    colSpan: "9"
   }, "Sin pagos seleccionados."))), React.createElement("tfoot", null, React.createElement("tr", null, React.createElement("td", {
     style: {
       ...td,
@@ -3560,8 +3583,10 @@ const RelacionCobrosPrint = ({
       ...td,
       background: '#e2e8f0'
     },
-    colSpan: "2"
-  })))), sinTasa > 0 && React.createElement("p", {
+    colSpan: "3"
+  })))), React.createElement("div", {
+    id: "rc-footer"
+  }, sinTasa > 0 && React.createElement("p", {
     style: {
       marginTop: '6px',
       fontSize: '8px',
@@ -3589,7 +3614,7 @@ const RelacionCobrosPrint = ({
       letterSpacing: '0.05em',
       color: '#334155'
     }
-  }, l)))));
+  }, l))))));
 };
 const PagosAdminPanel = ({
   currentUser,
@@ -3605,6 +3630,7 @@ const PagosAdminPanel = ({
   const [filtroVendedor, setFiltroVendedor] = useState('ALL');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  const [filtroFechaTipo, setFiltroFechaTipo] = useState('pago');
   const [seleccionados, setSeleccionados] = useState([]);
   const [showPrint, setShowPrint] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -3627,12 +3653,16 @@ const PagosAdminPanel = ({
     return (pagos || []).filter(p => {
       if (filtroEstado !== 'ALL' && (p.estado || 'Pendiente') !== filtroEstado) return false;
       if (filtroVendedor !== 'ALL' && String(p.vendedorId) !== filtroVendedor) return false;
-      if (desde && (p.fechaPago || '') < desde) return false;
-      if (hasta && (p.fechaPago || '') > hasta) return false;
+      if (desde || hasta) {
+        const campo = filtroFechaTipo === 'carga' ? p.fechaReporte : p.fechaPago;
+        const dia = String(campo || '').slice(0, 10);
+        if (desde && dia < desde) return false;
+        if (hasta && dia > hasta) return false;
+      }
       if (!q) return true;
       return (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.vendedorNombre || '').toLowerCase().includes(q) || String(p.clienteId || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q));
     }).sort((a, b) => safeGetTime(b.fechaReporte) - safeGetTime(a.fechaReporte));
-  }, [pagos, busqueda, filtroEstado, filtroVendedor, desde, hasta]);
+  }, [pagos, busqueda, filtroEstado, filtroVendedor, desde, hasta, filtroFechaTipo]);
   const gruposPantalla = useMemo(() => {
     const mapa = new Map();
     filtrados.forEach(p => {
@@ -3652,9 +3682,9 @@ const PagosAdminPanel = ({
     return Array.from(mapa.values()).sort((a, b) => a.ruta.localeCompare(b.ruta));
   }, [filtrados]);
   useEffect(() => {
-    setSeleccionados(prev => prev.filter(id => filtrados.some(p => p.id === id)));
-  }, [filtrados]);
-  const pagosSeleccionados = useMemo(() => filtrados.filter(p => seleccionados.includes(p.id)), [filtrados, seleccionados]);
+    setSeleccionados(prev => prev.filter(id => (pagos || []).some(p => p.id === id)));
+  }, [pagos]);
+  const pagosSeleccionados = useMemo(() => (pagos || []).filter(p => seleccionados.includes(p.id)), [pagos, seleccionados]);
   const totales = useMemo(() => {
     const suma = lista => lista.reduce((a, p) => a + (Number(p.montoUsd) || 0), 0);
     return {
@@ -3728,7 +3758,7 @@ const PagosAdminPanel = ({
       setIsSaving(false);
     }
   };
-  const descargarPdf = () => {
+  const descargarPdf = async () => {
     if (!window.html2pdf) {
       openModal('alert', null, 'Error', 'El módulo de impresión aún se está cargando. Intenta de nuevo en unos segundos.', true);
       return;
@@ -3739,44 +3769,108 @@ const PagosAdminPanel = ({
     holder.style.cssText = 'width:1100px; background:#fff;';
     holder.appendChild(source.cloneNode(true));
     document.body.appendChild(holder);
-    const element = holder;
     const prevHtmlOverflowX = document.documentElement.style.overflowX;
     const prevBodyOverflowX = document.body.style.overflowX;
     document.documentElement.style.overflowX = 'hidden';
     document.body.style.overflowX = 'hidden';
-    const restoreBoxes = () => {
+    try {
+      const marginIn = 0.4;
+      const pageWIn = 11,
+        pageHIn = 8.5;
+      const contentWIn = pageWIn - marginIn * 2;
+      const contentHIn = pageHIn - marginIn * 2;
+      const cssPxPerIn = holder.offsetWidth / contentWIn;
+      const maxContentHeightCssPx = contentHIn * cssPxPerIn;
+      const headerEl = holder.querySelector('#rc-pageheader');
+      const headerHeight = headerEl.getBoundingClientRect().height;
+      const theadEl = holder.querySelector('#rc-tabla thead');
+      const theadHeight = theadEl.getBoundingClientRect().height;
+      const paddingOverhead = 32;
+      const maxPrimeraPagina = maxContentHeightCssPx - paddingOverhead - headerHeight - theadHeight;
+      const maxOtrasPaginas = maxContentHeightCssPx - paddingOverhead - theadHeight;
+      const filas = Array.from(holder.querySelectorAll('#rc-tabla tbody tr, #rc-tabla tfoot tr'));
+      const holderTop = holder.getBoundingClientRect().top;
+      const paginasFilas = [[]];
+      let pageStartY = 0;
+      filas.forEach(row => {
+        const rect = row.getBoundingClientRect();
+        const top = rect.top - holderTop;
+        const bottom = rect.bottom - holderTop;
+        const esPrimera = paginasFilas.length === 1;
+        const capacidad = esPrimera ? maxPrimeraPagina : maxOtrasPaginas;
+        if (bottom - pageStartY > capacidad && paginasFilas[paginasFilas.length - 1].length > 0) {
+          paginasFilas.push([]);
+          pageStartY = top;
+        }
+        paginasFilas[paginasFilas.length - 1].push(row);
+      });
+      const colgroupHtml = holder.querySelector('#rc-tabla colgroup').outerHTML;
+      const theadHtml = theadEl.outerHTML;
+      const headerHtml = headerEl.outerHTML;
+      const footerHtml = holder.querySelector('#rc-footer').outerHTML;
+      const construirPagina = (filasDePagina, esPrimera, esUltima) => {
+        const div = document.createElement('div');
+        div.style.cssText = 'background:#fff; padding:16px; width:1100px;';
+        if (esPrimera) div.innerHTML += headerHtml;
+        const tabla = document.createElement('table');
+        tabla.style.cssText = 'width:100%; border-collapse:collapse; table-layout:fixed;';
+        tabla.innerHTML = colgroupHtml + theadHtml + '<tbody>' + filasDePagina.map(r => r.outerHTML).join('') + '</tbody>';
+        div.appendChild(tabla);
+        if (esUltima) div.innerHTML += footerHtml;
+        document.body.appendChild(div);
+        return div;
+      };
+      let pdf = null;
+      for (let p = 0; p < paginasFilas.length; p++) {
+        const esPrimera = p === 0;
+        const esUltima = p === paginasFilas.length - 1;
+        const pageDiv = construirPagina(paginasFilas[p], esPrimera, esUltima);
+        if (esPrimera) {
+          const opt = {
+            margin: marginIn,
+            image: {
+              type: 'jpeg',
+              quality: 0.98
+            },
+            html2canvas: {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              width: pageDiv.offsetWidth
+            },
+            jsPDF: {
+              unit: 'in',
+              format: 'letter',
+              orientation: 'landscape'
+            }
+          };
+          pdf = await window.html2pdf().set(opt).from(pageDiv).toPdf().get('pdf');
+        } else {
+          const canvas = await window.html2pdf().set({
+            html2canvas: {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              width: pageDiv.offsetWidth
+            }
+          }).from(pageDiv).toCanvas().get('canvas');
+          const imgData = canvas.toDataURL('image/jpeg', 0.98);
+          const imgHIn = canvas.height / canvas.width * contentWIn;
+          pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', marginIn, marginIn, contentWIn, Math.min(imgHIn, contentHIn));
+        }
+        pageDiv.remove();
+      }
+      pdf.save(`Relacion_Cobros_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error(err);
+      openModal('alert', null, 'Error', 'No se pudo generar el PDF.', true);
+    } finally {
       holder.remove();
       document.documentElement.style.overflowX = prevHtmlOverflowX;
       document.body.style.overflowX = prevBodyOverflowX;
-    };
-    const opt = {
-      margin: 0.4,
-      filename: `Relacion_Cobros_${new Date().toISOString().slice(0, 10)}.pdf`,
-      image: {
-        type: 'jpeg',
-        quality: 0.98
-      },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        width: holder.offsetWidth
-      },
-      jsPDF: {
-        unit: 'in',
-        format: 'letter',
-        orientation: 'landscape'
-      },
-      pagebreak: {
-        mode: ['css', 'legacy'],
-        avoid: 'tr'
-      }
-    };
-    window.html2pdf().set(opt).from(element).save().then(() => setIsPrinting(false)).catch(err => {
-      console.error(err);
       setIsPrinting(false);
-      openModal('alert', null, 'Error', 'No se pudo generar el PDF.', true);
-    }).finally(restoreBoxes);
+    }
   };
   const hayFiltro = busqueda || filtroVendedor !== 'ALL' || desde || hasta || filtroEstado !== 'Pendiente';
   return React.createElement("div", {
@@ -3829,7 +3923,16 @@ const PagosAdminPanel = ({
   }, "Todas las rutas"), vendedoresUnicos.map(v => React.createElement("option", {
     key: v.id,
     value: v.id
-  }, v.nombre))), React.createElement("div", {
+  }, v.nombre))), React.createElement("select", {
+    value: filtroFechaTipo,
+    onChange: e => setFiltroFechaTipo(e.target.value),
+    className: "bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-2 py-2 outline-none cursor-pointer",
+    title: "A qué fecha aplica el rango Desde/Hasta"
+  }, React.createElement("option", {
+    value: "pago"
+  }, "Filtrar por Fecha de Pago"), React.createElement("option", {
+    value: "carga"
+  }, "Filtrar por Fecha de Carga")), React.createElement("div", {
     className: "flex items-center gap-2 bg-white border border-slate-200 p-1 rounded-lg"
   }, React.createElement("span", {
     className: "text-[10px] font-bold text-slate-400 uppercase ml-1"
@@ -3854,6 +3957,7 @@ const PagosAdminPanel = ({
       setFiltroVendedor('ALL');
       setDesde('');
       setHasta('');
+      setFiltroFechaTipo('pago');
     },
     className: "p-2 bg-red-50 text-red-500 hover:bg-red-100 rounded-lg transition-colors shadow-sm",
     title: "Limpiar filtros"
@@ -13128,10 +13232,19 @@ function App() {
       id: d.id,
       ...d.data()
     }))));
-    const unsubPagos = onSnapshot(collection(db, getCollectionPath('pagos')), snap => setPagosData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
+    const unsubPagos = onSnapshot(collection(db, getCollectionPath('pagos')), {
+      includeMetadataChanges: true
+    }, snap => {
+      const nuevos = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        _pendienteEnviar: d.metadata.hasPendingWrites
+      }));
+      setPagosData(prev => {
+        if (snap.metadata.fromCache && prev && nuevos.length < prev.length) return prev;
+        return nuevos;
+      });
+    });
     const unsubTasas = onSnapshot(collection(db, getCollectionPath('tasas')), snap => setTasasData(snap.docs.map(d => ({
       id: d.id,
       ...d.data()
