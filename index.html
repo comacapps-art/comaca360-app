@@ -791,6 +791,42 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
     totalClientesSinActivar: idsInactivosUnicos.size
   };
 };
+const calcularMatrizActivacion = (sales, clientesCartera, {
+  categorias,
+  campoCategoria
+}) => {
+  const catSet = new Set(categorias || []);
+  const activasPorCliente = new Map();
+  (sales || []).forEach(s => {
+    const cat = s && s[campoCategoria];
+    if (!cat || !catSet.has(cat)) return;
+    const monto = Number(s.monto) || 0;
+    const cajas = Number(s.cajas) || 0;
+    if (monto <= 0 && cajas <= 0) return;
+    const idC = normalizeId(s.idCliente) || s.idCliente || 'S/N';
+    if (!activasPorCliente.has(idC)) activasPorCliente.set(idC, new Set());
+    activasPorCliente.get(idC).add(cat);
+  });
+  const clientes = (clientesCartera || []).map(c => {
+    const idC = normalizeId(c.idCliente) || c.idCliente;
+    const activas = activasPorCliente.get(idC) || new Set();
+    const activasPorCategoria = {};
+    (categorias || []).forEach(cat => {
+      activasPorCategoria[cat] = activas.has(cat);
+    });
+    return {
+      idCliente: c.idCliente,
+      cliente: c.cliente,
+      activasPorCategoria,
+      totalActivas: activas.size,
+      totalCategorias: (categorias || []).length
+    };
+  });
+  return {
+    clientes,
+    categorias: categorias || []
+  };
+};
 const obtenerGruposYArticulos = (sales, filtros) => {
   const {
     grupo,
@@ -6965,6 +7001,664 @@ const ActivacionProductoPanel = ({
     className: "mx-auto mb-3 opacity-30"
   }), "No hay clientes de cartera ni ventas que coincidan con el filtro elegido.")))))));
 };
+const MATRIZ_ANCHO_COL_CLIENTE = 260;
+const MATRIZ_ANCHO_MIN_CATEGORIA = 70;
+const MatrizActivacionPrint = ({
+  resultado,
+  categorias,
+  titulo,
+  subtitulo
+}) => {
+  const th = {
+    border: '1px solid #000',
+    padding: '6px 4px',
+    background: '#111',
+    color: '#fff',
+    fontWeight: 900,
+    fontSize: '9px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em'
+  };
+  const td = {
+    border: '1px solid #000',
+    padding: '5px 4px',
+    fontSize: '9px',
+    verticalAlign: 'middle',
+    textAlign: 'center'
+  };
+  const anchoClientePct = 24;
+  const anchoCategoriaPct = categorias.length > 0 ? (100 - anchoClientePct) / categorias.length : 0;
+  return React.createElement("div", {
+    style: {
+      background: '#fff',
+      padding: '16px',
+      width: '100%'
+    }
+  }, React.createElement("div", {
+    "data-role": "header"
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      marginBottom: '10px'
+    }
+  }, React.createElement("div", null, React.createElement("p", {
+    style: {
+      fontSize: '22px',
+      fontWeight: 900,
+      letterSpacing: '-0.04em',
+      lineHeight: 1,
+      color: '#111'
+    }
+  }, "COMACA ", React.createElement("span", {
+    style: {
+      color: '#f97316'
+    }
+  }, "360")), React.createElement("p", {
+    style: {
+      fontSize: '8px',
+      fontWeight: 700,
+      letterSpacing: '0.35em',
+      color: '#f97316',
+      marginTop: '2px'
+    }
+  }, "DE OCCIDENTE")), React.createElement("div", {
+    style: {
+      textAlign: 'right',
+      fontSize: '9px',
+      color: '#334155'
+    }
+  }, React.createElement("p", {
+    style: {
+      fontWeight: 700
+    }
+  }, "Impreso: ", new Date().toLocaleDateString()), React.createElement("p", null, resultado.clientes.length, " clientes"))), React.createElement("div", {
+    style: {
+      background: '#111',
+      color: '#fff',
+      textAlign: 'center',
+      padding: '7px',
+      fontWeight: 900,
+      fontSize: '13px',
+      letterSpacing: '0.02em',
+      marginBottom: subtitulo ? '2px' : '10px'
+    }
+  }, titulo || 'MATRIZ DE ACTIVACIÓN POR CATEGORÍA'), subtitulo && React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      fontSize: '9px',
+      fontWeight: 700,
+      color: '#475569',
+      marginBottom: '10px'
+    }
+  }, subtitulo)), React.createElement("table", {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      tableLayout: 'fixed'
+    }
+  }, React.createElement("colgroup", null, React.createElement("col", {
+    style: {
+      width: anchoClientePct + '%'
+    }
+  }), categorias.map((c, i) => React.createElement("col", {
+    key: i,
+    style: {
+      width: anchoCategoriaPct + '%'
+    }
+  }))), React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
+    style: {
+      ...th,
+      textAlign: 'left'
+    }
+  }, "Cliente"), categorias.map(c => React.createElement("th", {
+    key: c
+  }, c)))), React.createElement("tbody", null, resultado.clientes.map(c => React.createElement("tr", {
+    key: c.idCliente
+  }, React.createElement("td", {
+    style: {
+      ...td,
+      textAlign: 'left',
+      fontWeight: 700
+    }
+  }, React.createElement("span", {
+    style: {
+      fontFamily: 'monospace',
+      color: '#94a3b8',
+      marginRight: '6px'
+    }
+  }, c.idCliente), c.cliente), categorias.map(cat => React.createElement("td", {
+    key: cat,
+    style: {
+      ...td,
+      background: c.activasPorCategoria[cat] ? '#f0fdf4' : '#fff',
+      color: c.activasPorCategoria[cat] ? '#16a34a' : '#cbd5e1',
+      fontWeight: 900
+    }
+  }, c.activasPorCategoria[cat] ? '✓' : '–')))), resultado.clientes.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    style: {
+      ...td,
+      textAlign: 'center',
+      padding: '24px'
+    },
+    colSpan: categorias.length + 1
+  }, "Sin clientes de cartera para esta ruta.")))), React.createElement("div", {
+    "data-role": "footer"
+  }, React.createElement("p", {
+    style: {
+      marginTop: '10px',
+      fontSize: '8px',
+      color: '#475569',
+      fontWeight: 700
+    }
+  }, "Un cliente cuenta como activo en una categoría si tuvo alguna venta con monto o cajas positivos en el período mostrado.")));
+};
+const MatrizActivacionPanel = ({
+  sales,
+  cartera,
+  users
+}) => {
+  const usersSeguro = users || [];
+  const monthNamesMatriz = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const rutasDisponibles = useMemo(() => {
+    const map = new Map();
+    (cartera || []).forEach(c => {
+      const id = normalizeId(c.idVendedor) || c.idVendedor;
+      if (!id) return;
+      if (!map.has(id)) map.set(id, {
+        id: c.idVendedor,
+        nombre: c.vendedorNombre || ''
+      });
+    });
+    return Array.from(map.values()).map(r => {
+      const u = usersSeguro.find(u => normalizeId(u.id) === normalizeId(r.id));
+      return {
+        id: r.id,
+        nombre: u && u.nombre || r.nombre || r.id
+      };
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [cartera, usersSeguro]);
+  const [vendedorId, setVendedorId] = useState('');
+  useEffect(() => {
+    if (!vendedorId && rutasDisponibles.length > 0) setVendedorId(rutasDisponibles[0].id);
+  }, [rutasDisponibles]);
+  const clientesCartera = useMemo(() => vendedorId ? filtrarCarteraPorVendedor(cartera, vendedorId) : [], [cartera, vendedorId]);
+  const [campoCategoria, setCampoCategoria] = useState('grupo');
+  const {
+    grupos: gruposDisponiblesMatriz,
+    subgrupos: subgruposDisponiblesMatriz
+  } = useMemo(() => obtenerGruposYArticulos(sales, {}), [sales]);
+  const [gruposFiltro, setGruposFiltro] = useState([]);
+  const toggleGrupoFiltro = g => setGruposFiltro(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
+  const subgruposDelGrupo = useMemo(() => {
+    if (gruposFiltro.length === 0) return subgruposDisponiblesMatriz;
+    const gset = new Set(gruposFiltro);
+    const set = new Set();
+    (sales || []).forEach(s => {
+      if (gset.has(s.grupo) && s.subgrupo) set.add(s.subgrupo);
+    });
+    return Array.from(set).sort();
+  }, [sales, gruposFiltro, subgruposDisponiblesMatriz]);
+  const categoriasDisponibles = campoCategoria === 'grupo' ? gruposDisponiblesMatriz : subgruposDelGrupo;
+  const [categoriasSeleccionadas, setCategoriasSeleccionadas] = useState([]);
+  useEffect(() => {
+    setCategoriasSeleccionadas(campoCategoria === 'grupo' ? gruposDisponiblesMatriz : subgruposDelGrupo);
+  }, [campoCategoria, gruposDisponiblesMatriz, subgruposDelGrupo]);
+  const toggleCategoria = cat => setCategoriasSeleccionadas(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
+  const salesRuta = useMemo(() => {
+    if (!vendedorId) return [];
+    const vid = normalizeId(vendedorId);
+    let base = (sales || []).filter(s => normalizeId(s.idVendedor) === vid);
+    if (campoCategoria === 'subgrupo' && gruposFiltro.length > 0) base = base.filter(s => gruposFiltro.includes(s.grupo));
+    return base;
+  }, [sales, vendedorId, campoCategoria, gruposFiltro]);
+  const availableYearsMatriz = useMemo(() => {
+    const years = new Set();
+    (sales || []).forEach(s => {
+      if (s.fecha) years.add(String(s.fecha).substring(0, 4));
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [sales]);
+  const [selectedYearMatriz, setSelectedYearMatriz] = useState('');
+  useEffect(() => {
+    if (!selectedYearMatriz && availableYearsMatriz.length > 0) setSelectedYearMatriz(availableYearsMatriz[0]);
+  }, [availableYearsMatriz]);
+  const [mesesSeleccionados, setMesesSeleccionados] = useState([]);
+  const toggleMesMatriz = i => setMesesSeleccionados(prev => prev.includes(i) ? prev.filter(m => m !== i) : [...prev, i].sort((a, b) => a - b));
+  const currentMonthStrMatriz = useMemo(() => {
+    const cmSales = (sales || []).filter(s => s.source === 'currMonth');
+    return getLatestMonthStr(cmSales.length > 0 ? cmSales : sales);
+  }, [sales]);
+  const usarMesEnCurso = () => {
+    const [y, m] = currentMonthStrMatriz.split('-');
+    setSelectedYearMatriz(y);
+    setMesesSeleccionados([parseInt(m, 10) - 1]);
+  };
+  const [modo, setModo] = useState('combinado');
+  const [busquedaClienteMatriz, setBusquedaClienteMatriz] = useState('');
+  const [soloConPendientes, setSoloConPendientes] = useState(false);
+  const salesPorMes = useMemo(() => {
+    if (!selectedYearMatriz) return [];
+    return mesesSeleccionados.map(mIndex => {
+      const ym = `${selectedYearMatriz}-${String(mIndex + 1).padStart(2, '0')}`;
+      return {
+        mIndex,
+        ym,
+        label: formatMonthStr(ym),
+        sales: salesRuta.filter(s => String(s.fecha).slice(0, 7) === ym)
+      };
+    });
+  }, [salesRuta, selectedYearMatriz, mesesSeleccionados]);
+  const resultadoCombinado = useMemo(() => calcularMatrizActivacion(salesPorMes.flatMap(m => m.sales), clientesCartera, {
+    categorias: categoriasSeleccionadas,
+    campoCategoria
+  }), [salesPorMes, clientesCartera, categoriasSeleccionadas, campoCategoria]);
+  const resultadosSeparados = useMemo(() => salesPorMes.map(m => ({
+    label: m.label,
+    resultado: calcularMatrizActivacion(m.sales, clientesCartera, {
+      categorias: categoriasSeleccionadas,
+      campoCategoria
+    })
+  })), [salesPorMes, clientesCartera, categoriasSeleccionadas, campoCategoria]);
+  const filtrarClientesMatriz = clientes => {
+    const q = busquedaClienteMatriz.trim().toLowerCase();
+    return (clientes || []).filter(c => {
+      if (soloConPendientes && c.totalActivas >= c.totalCategorias) return false;
+      if (!q) return true;
+      return (c.cliente || '').toLowerCase().includes(q) || String(c.idCliente || '').toLowerCase().includes(q);
+    });
+  };
+  const vistaUnica = modo === 'combinado' || mesesSeleccionados.length <= 1;
+  const vistasAMostrar = vistaUnica ? [{
+    label: mesesSeleccionados.length > 1 ? `${mesesSeleccionados.length} meses de ${selectedYearMatriz} (combinado)` : mesesSeleccionados.length === 1 ? formatMonthStr(`${selectedYearMatriz}-${String(mesesSeleccionados[0] + 1).padStart(2, '0')}`) : '',
+    resultado: resultadoCombinado
+  }] : resultadosSeparados;
+  const [showPrintMatriz, setShowPrintMatriz] = useState(false);
+  const [isPrintingMatriz, setIsPrintingMatriz] = useState(false);
+  const [progresoMatriz, setProgresoMatriz] = useState({
+    actual: 0,
+    total: 0
+  });
+  const seccionesParaImprimir = useMemo(() => vistasAMostrar.map(v => ({
+    titulo: (v.label || 'MATRIZ DE ACTIVACIÓN POR CATEGORÍA').toUpperCase(),
+    resultado: {
+      ...v.resultado,
+      clientes: filtrarClientesMatriz(v.resultado.clientes)
+    }
+  })), [vistasAMostrar, busquedaClienteMatriz, soloConPendientes]);
+  const chunksDeCategorias = useMemo(() => {
+    const disponible = 1100 - MATRIZ_ANCHO_COL_CLIENTE;
+    const porPagina = Math.max(1, Math.floor(disponible / MATRIZ_ANCHO_MIN_CATEGORIA));
+    return chunkArray(categoriasSeleccionadas, porPagina);
+  }, [categoriasSeleccionadas]);
+  const descargarPdfMatriz = async () => {
+    if (!window.html2pdf) {
+      openModal('alert', null, 'Error', 'El módulo de impresión aún se está cargando. Intenta de nuevo en unos segundos.', true);
+      return;
+    }
+    setIsPrintingMatriz(true);
+    const totalGrupos = seccionesParaImprimir.length * chunksDeCategorias.length;
+    setProgresoMatriz({
+      actual: 0,
+      total: totalGrupos
+    });
+    const prevHtmlOverflowX = document.documentElement.style.overflowX;
+    const prevBodyOverflowX = document.body.style.overflowX;
+    document.documentElement.style.overflowX = 'hidden';
+    document.body.style.overflowX = 'hidden';
+    const marginIn = 0.4;
+    const pageWIn = 11,
+      pageHIn = 8.5;
+    const contentWIn = pageWIn - marginIn * 2;
+    const contentHIn = pageHIn - marginIn * 2;
+    const holdersCreados = [];
+    let pdf = null;
+    try {
+      for (let si = 0; si < seccionesParaImprimir.length; si++) {
+        for (let ci = 0; ci < chunksDeCategorias.length; ci++) {
+          await yieldToBrowser();
+          setProgresoMatriz({
+            actual: si * chunksDeCategorias.length + ci,
+            total: totalGrupos
+          });
+          const source = document.getElementById(`ma-print-${si}-${ci}`);
+          if (!source) continue;
+          const holder = document.createElement('div');
+          holder.style.cssText = 'width:1100px; background:#fff;';
+          holder.appendChild(source.cloneNode(true));
+          document.body.appendChild(holder);
+          holdersCreados.push(holder);
+          const cssPxPerIn = holder.offsetWidth / contentWIn;
+          const maxContentHeightCssPx = contentHIn * cssPxPerIn;
+          const headerEl = holder.querySelector('[data-role="header"]');
+          const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 0;
+          const theadEl = holder.querySelector('table thead');
+          const theadHeight = theadEl.getBoundingClientRect().height;
+          const footerEl = holder.querySelector('[data-role="footer"]');
+          const paddingOverhead = 32;
+          const maxPrimeraPagina = maxContentHeightCssPx - paddingOverhead - headerHeight - theadHeight;
+          const maxOtrasPaginas = maxContentHeightCssPx - paddingOverhead - theadHeight;
+          const filas = Array.from(holder.querySelectorAll('table tbody tr'));
+          const holderTop = holder.getBoundingClientRect().top;
+          const paginasFilas = [[]];
+          let pageStartY = 0;
+          filas.forEach(row => {
+            const rect = row.getBoundingClientRect();
+            const top = rect.top - holderTop;
+            const bottom = rect.bottom - holderTop;
+            const esPrimera = paginasFilas.length === 1;
+            const capacidad = esPrimera ? maxPrimeraPagina : maxOtrasPaginas;
+            if (bottom - pageStartY > capacidad && paginasFilas[paginasFilas.length - 1].length > 0) {
+              paginasFilas.push([]);
+              pageStartY = top;
+            }
+            paginasFilas[paginasFilas.length - 1].push(row);
+          });
+          const colgroupHtml = holder.querySelector('table colgroup').outerHTML;
+          const theadHtml = theadEl.outerHTML;
+          const headerHtml = headerEl ? headerEl.outerHTML : '';
+          const footerHtml = footerEl ? footerEl.outerHTML : '';
+          for (let p = 0; p < paginasFilas.length; p++) {
+            if (p > 0) await yieldToBrowser();
+            const esPrimeraDelChunk = p === 0;
+            const esUltimaDelChunk = p === paginasFilas.length - 1;
+            const pageDiv = document.createElement('div');
+            pageDiv.style.cssText = 'background:#fff; padding:16px; width:1100px;';
+            if (esPrimeraDelChunk) pageDiv.innerHTML += headerHtml;
+            const tabla = document.createElement('table');
+            tabla.style.cssText = 'width:100%; border-collapse:collapse; table-layout:fixed;';
+            tabla.innerHTML = colgroupHtml + theadHtml + '<tbody>' + paginasFilas[p].map(r => r.outerHTML).join('') + '</tbody>';
+            pageDiv.appendChild(tabla);
+            if (esUltimaDelChunk) pageDiv.innerHTML += footerHtml;
+            document.body.appendChild(pageDiv);
+            holdersCreados.push(pageDiv);
+            if (!pdf) {
+              const opt = {
+                margin: marginIn,
+                image: {
+                  type: 'jpeg',
+                  quality: 0.98
+                },
+                html2canvas: {
+                  scale: 2,
+                  useCORS: true,
+                  logging: false,
+                  width: pageDiv.offsetWidth
+                },
+                jsPDF: {
+                  unit: 'in',
+                  format: 'letter',
+                  orientation: 'landscape'
+                }
+              };
+              pdf = await window.html2pdf().set(opt).from(pageDiv).toPdf().get('pdf');
+            } else {
+              const canvas = await window.html2pdf().set({
+                html2canvas: {
+                  scale: 2,
+                  useCORS: true,
+                  logging: false,
+                  width: pageDiv.offsetWidth
+                }
+              }).from(pageDiv).toCanvas().get('canvas');
+              const imgData = canvas.toDataURL('image/jpeg', 0.98);
+              const imgHIn = canvas.height / canvas.width * contentWIn;
+              pdf.addPage();
+              pdf.addImage(imgData, 'JPEG', marginIn, marginIn, contentWIn, Math.min(imgHIn, contentHIn));
+            }
+          }
+        }
+      }
+      if (pdf) pdf.save(`Matriz_Activacion_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error(err);
+      openModal('alert', null, 'Error', 'No se pudo generar el PDF.', true);
+    } finally {
+      holdersCreados.forEach(h => h.remove());
+      document.documentElement.style.overflowX = prevHtmlOverflowX;
+      document.body.style.overflowX = prevBodyOverflowX;
+      setIsPrintingMatriz(false);
+    }
+  };
+  const inputClsMatriz = "text-sm border-2 border-slate-200 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors font-medium text-slate-700";
+  return React.createElement("div", {
+    className: "space-y-6 animate-fadeIn"
+  }, React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4"
+  }, React.createElement("div", {
+    className: "flex flex-wrap items-center justify-between gap-3"
+  }, React.createElement("h3", {
+    className: "font-black text-lg text-blue-900 flex items-center gap-3"
+  }, React.createElement(TableProperties, {
+    className: "text-orange-500"
+  }), " Matriz de Activación por Categoría"), categoriasSeleccionadas.length > 0 && React.createElement("button", {
+    onClick: () => setShowPrintMatriz(true),
+    className: "bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+  }, React.createElement(Printer, {
+    size: 16
+  }), " Exportar PDF")), React.createElement("p", {
+    className: "text-slate-500 text-sm font-medium"
+  }, "Filas = clientes de la ruta, columnas = categorías. Un cliente cuenta como activo si compró algo (monto o cajas) de esa categoría en el período elegido."), rutasDisponibles.length > 1 && React.createElement("div", {
+    className: "flex flex-col gap-1 max-w-xs"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Ruta"), React.createElement("select", {
+    value: vendedorId,
+    onChange: e => setVendedorId(e.target.value),
+    className: inputClsMatriz + ' cursor-pointer'
+  }, rutasDisponibles.map(r => React.createElement("option", {
+    key: r.id,
+    value: r.id
+  }, r.id, " - ", r.nombre)))), React.createElement("div", {
+    className: "flex flex-wrap gap-6 items-start pt-2 border-t border-slate-100"
+  }, React.createElement("div", {
+    className: "flex flex-col gap-2"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Categoría"), React.createElement("div", {
+    className: "flex bg-slate-100 p-1 rounded-xl"
+  }, React.createElement("button", {
+    onClick: () => setCampoCategoria('grupo'),
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${campoCategoria === 'grupo' ? 'bg-blue-900 text-white' : 'text-slate-500'}`
+  }, "Grupo (Marca)"), React.createElement("button", {
+    onClick: () => setCampoCategoria('subgrupo'),
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${campoCategoria === 'subgrupo' ? 'bg-blue-900 text-white' : 'text-slate-500'}`
+  }, "Subgrupo"))), campoCategoria === 'subgrupo' && React.createElement("div", {
+    className: "flex flex-col gap-2 max-w-md"
+  }, React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Dentro de estas marcas (vacío = todas)"), gruposFiltro.length > 0 && React.createElement("button", {
+    onClick: () => setGruposFiltro([]),
+    className: "text-[10px] font-black text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full uppercase hover:bg-red-100"
+  }, "Ninguna")), React.createElement("div", {
+    className: "flex flex-wrap gap-1.5 max-h-20 overflow-y-auto"
+  }, gruposDisponiblesMatriz.map(g => React.createElement("button", {
+    key: g,
+    onClick: () => toggleGrupoFiltro(g),
+    className: `px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors ${gruposFiltro.includes(g) ? 'bg-blue-900 border-blue-900 text-white' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`
+  }, g)))), React.createElement("div", {
+    className: "flex flex-col gap-2"
+  }, React.createElement("div", {
+    className: "flex items-center justify-between gap-3"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Año / Meses"), React.createElement("button", {
+    onClick: usarMesEnCurso,
+    className: "text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full uppercase hover:bg-blue-100"
+  }, "Solo mes en curso")), React.createElement("div", {
+    className: "flex flex-wrap items-center gap-1.5"
+  }, React.createElement("select", {
+    value: selectedYearMatriz,
+    onChange: e => setSelectedYearMatriz(e.target.value),
+    className: inputClsMatriz + ' cursor-pointer !p-2 text-xs'
+  }, availableYearsMatriz.map(y => React.createElement("option", {
+    key: y,
+    value: y
+  }, y))), React.createElement("div", {
+    className: "w-px h-6 bg-slate-200 mx-1"
+  }), monthNamesMatriz.map((mName, i) => React.createElement("button", {
+    key: i,
+    onClick: () => toggleMesMatriz(i),
+    className: `px-2 py-1 text-xs font-bold rounded-lg transition-colors ${mesesSeleccionados.includes(i) ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`
+  }, mName)))), mesesSeleccionados.length > 1 && React.createElement("div", {
+    className: "flex flex-col gap-2"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, "Varios meses"), React.createElement("div", {
+    className: "flex bg-slate-100 p-1 rounded-xl"
+  }, React.createElement("button", {
+    onClick: () => setModo('combinado'),
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${modo === 'combinado' ? 'bg-blue-900 text-white' : 'text-slate-500'}`
+  }, "Combinado (suma)"), React.createElement("button", {
+    onClick: () => setModo('separado'),
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${modo === 'separado' ? 'bg-blue-900 text-white' : 'text-slate-500'}`
+  }, "Separado por mes")))), React.createElement("div", {
+    className: "flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100"
+  }, React.createElement("label", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-500 shrink-0"
+  }, campoCategoria === 'subgrupo' && gruposFiltro.length > 0 ? `Subgrupos de ${gruposFiltro.length === 1 ? gruposFiltro[0] : `${gruposFiltro.length} marcas`}` : 'Categorías a mostrar'), React.createElement("button", {
+    onClick: () => setCategoriasSeleccionadas(categoriasDisponibles),
+    className: "text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full uppercase hover:bg-blue-100"
+  }, "Todas"), React.createElement("button", {
+    onClick: () => setCategoriasSeleccionadas([]),
+    className: "text-[10px] font-black text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full uppercase hover:bg-red-100"
+  }, "Ninguna"), React.createElement("div", {
+    className: "flex flex-wrap gap-1.5 max-h-24 overflow-y-auto"
+  }, categoriasDisponibles.map(cat => React.createElement("button", {
+    key: cat,
+    onClick: () => toggleCategoria(cat),
+    className: `px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors ${categoriasSeleccionadas.includes(cat) ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`
+  }, cat))), categoriasSeleccionadas.length > 20 && React.createElement("span", {
+    className: "text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg"
+  }, categoriasSeleccionadas.length, " categorías seleccionadas: generar el PDF puede tardar. Para uno más rápido, desmarca las que no necesites.")), React.createElement("div", {
+    className: "flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100"
+  }, React.createElement("div", {
+    className: "relative flex-1 min-w-[200px] max-w-xs"
+  }, React.createElement(Search, {
+    className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400",
+    size: 14
+  }), React.createElement("input", {
+    type: "text",
+    placeholder: "Buscar cliente...",
+    value: busquedaClienteMatriz,
+    onChange: e => setBusquedaClienteMatriz(e.target.value),
+    className: "w-full pl-8 pr-3 py-2 bg-slate-50 border-2 border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500 font-medium"
+  })), React.createElement("label", {
+    className: "flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: soloConPendientes,
+    onChange: e => setSoloConPendientes(e.target.checked),
+    className: "w-4 h-4 accent-blue-600 cursor-pointer"
+  }), "Solo con categorías pendientes"))), !vendedorId && React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-slate-100 p-16 text-center text-slate-400"
+  }, React.createElement(TableProperties, {
+    size: 40,
+    className: "mx-auto mb-3 opacity-30"
+  }), "Elige una ruta para ver su matriz de activación."), vendedorId && mesesSeleccionados.length === 0 && React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-slate-100 p-16 text-center text-slate-400"
+  }, React.createElement(CalendarDays, {
+    size: 40,
+    className: "mx-auto mb-3 opacity-30"
+  }), "Elige al menos un mes para calcular la activación."), vendedorId && mesesSeleccionados.length > 0 && vistasAMostrar.map((v, vi) => {
+    const clientesFiltradosMatriz = filtrarClientesMatriz(v.resultado.clientes);
+    return React.createElement("div", {
+      key: vi,
+      className: "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
+    }, v.label && React.createElement("div", {
+      className: "px-6 py-3 bg-blue-50 border-b border-blue-100 font-black text-blue-900 text-sm uppercase tracking-wide"
+    }, v.label), React.createElement("div", {
+      className: "overflow-x-auto"
+    }, React.createElement("table", {
+      className: "text-xs text-left border-collapse"
+    }, React.createElement("thead", {
+      className: "bg-slate-50 text-slate-500 text-[10px] uppercase font-black tracking-wider"
+    }, React.createElement("tr", null, React.createElement("th", {
+      className: "px-4 py-3 sticky left-0 bg-slate-50 z-10 min-w-[220px]"
+    }, "Cliente"), categoriasSeleccionadas.map(cat => React.createElement("th", {
+      key: cat,
+      className: "px-3 py-3 text-center min-w-[80px]"
+    }, cat)), React.createElement("th", {
+      className: "px-3 py-3 text-center min-w-[60px]"
+    }, "Total"))), React.createElement("tbody", {
+      className: "divide-y divide-slate-100"
+    }, clientesFiltradosMatriz.map(c => React.createElement("tr", {
+      key: c.idCliente,
+      className: "hover:bg-blue-50/50"
+    }, React.createElement("td", {
+      className: "px-4 py-2 sticky left-0 bg-white z-10 font-bold text-slate-800"
+    }, React.createElement("span", {
+      className: "font-mono text-slate-400 mr-2"
+    }, c.idCliente), c.cliente), categoriasSeleccionadas.map(cat => React.createElement("td", {
+      key: cat,
+      className: "px-3 py-2 text-center"
+    }, c.activasPorCategoria[cat] ? React.createElement(CheckCircle2, {
+      size: 16,
+      className: "inline text-green-600"
+    }) : React.createElement(Minus, {
+      size: 16,
+      className: "inline text-slate-300"
+    }))), React.createElement("td", {
+      className: `px-3 py-2 text-center font-black ${c.totalActivas === c.totalCategorias ? 'text-green-600' : 'text-amber-600'}`
+    }, c.totalActivas, "/", c.totalCategorias))), clientesFiltradosMatriz.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: categoriasSeleccionadas.length + 2,
+      className: "px-6 py-10 text-center text-slate-400"
+    }, "Ningún cliente coincide con los filtros elegidos."))), clientesFiltradosMatriz.length > 0 && React.createElement("tfoot", {
+      className: "bg-slate-50 font-black text-slate-600"
+    }, React.createElement("tr", null, React.createElement("td", {
+      className: "px-4 py-2 sticky left-0 bg-slate-50 z-10"
+    }, "% activo"), categoriasSeleccionadas.map(cat => {
+      const activos = clientesFiltradosMatriz.filter(c => c.activasPorCategoria[cat]).length;
+      const pct = Math.round(activos / clientesFiltradosMatriz.length * 100);
+      return React.createElement("td", {
+        key: cat,
+        className: "px-3 py-2 text-center"
+      }, pct, "%");
+    }), React.createElement("td", {
+      className: "px-3 py-2"
+    }))))));
+  }), showPrintMatriz && React.createElement("div", {
+    className: "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+  }, React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col"
+  }, React.createElement("div", {
+    className: "p-4 border-b border-slate-200 flex justify-between items-center shrink-0"
+  }, React.createElement("h3", {
+    className: "font-black text-slate-800"
+  }, "Vista previa — Matriz de Activación"), React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement("button", {
+    onClick: descargarPdfMatriz,
+    disabled: isPrintingMatriz,
+    className: "bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 disabled:opacity-50"
+  }, isPrintingMatriz ? React.createElement("div", {
+    className: "w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"
+  }) : React.createElement(Printer, {
+    size: 16
+  }), isPrintingMatriz ? progresoMatriz.total > 0 ? `Generando ${progresoMatriz.actual}/${progresoMatriz.total}…` : 'Generando...' : 'Descargar PDF'), React.createElement("button", {
+    onClick: () => setShowPrintMatriz(false),
+    className: "p-2 hover:bg-slate-100 rounded-xl transition-colors"
+  }, React.createElement(X, {
+    size: 20
+  })))), React.createElement("div", {
+    className: "flex-1 overflow-y-auto bg-slate-100 p-4"
+  }, seccionesParaImprimir.map((sec, si) => React.createElement("div", {
+    key: si,
+    className: "mb-6"
+  }, chunksDeCategorias.map((chunk, ci) => React.createElement("div", {
+    key: ci,
+    id: `ma-print-${si}-${ci}`,
+    className: "bg-white mx-auto mb-4"
+  }, React.createElement(MatrizActivacionPrint, {
+    resultado: sec.resultado,
+    categorias: chunk,
+    titulo: sec.titulo,
+    subtitulo: chunksDeCategorias.length > 1 ? `Categorías, grupo ${ci + 1} de ${chunksDeCategorias.length}` : null
+  })))))))));
+};
 const HistoricoDashboard = ({
   currentUser,
   sales,
@@ -8898,7 +9592,15 @@ const VentasVendedorDashboard = ({
       className: `flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${subTabCartera === 'activacion' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
     }, React.createElement(Target, {
       size: 16
-    }), " Activación por Producto")), subTabCartera === 'activacion' && React.createElement(ActivacionProductoPanel, {
+    }), " Activación por Producto"), React.createElement("button", {
+      onClick: () => setSubTabCartera('matriz'),
+      className: `flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${subTabCartera === 'matriz' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
+    }, React.createElement(TableProperties, {
+      size: 16
+    }), " Matriz de Activación")), subTabCartera === 'activacion' && React.createElement(ActivacionProductoPanel, {
+      sales: sales,
+      cartera: miCarteraPropia
+    }), subTabCartera === 'matriz' && React.createElement(MatrizActivacionPanel, {
       sales: sales,
       cartera: miCarteraPropia
     }), subTabCartera === 'resumen' && React.createElement(React.Fragment, null, React.createElement("div", {
@@ -12366,9 +13068,18 @@ const GerenteDashboard = ({
     className: `flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${subTabCartera === 'activacion' ? 'bg-purple-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
   }, React.createElement(Target, {
     size: 16
-  }), " Activación por Producto")), subTabCartera === 'activacion' && React.createElement(ActivacionProductoPanel, {
+  }), " Activación por Producto"), React.createElement("button", {
+    onClick: () => setSubTabCartera('matriz'),
+    className: `flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${subTabCartera === 'matriz' ? 'bg-purple-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
+  }, React.createElement(TableProperties, {
+    size: 16
+  }), " Matriz de Activación")), subTabCartera === 'activacion' && React.createElement(ActivacionProductoPanel, {
     sales: teamSales,
     cartera: teamCartera
+  }), subTabCartera === 'matriz' && React.createElement(MatrizActivacionPanel, {
+    sales: teamSales,
+    cartera: teamCartera,
+    users: users
   }), subTabCartera === 'resumen' && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
   }, React.createElement("div", null, React.createElement("h3", {
