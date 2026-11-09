@@ -135,7 +135,7 @@ import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField, waitForPendingWrites } from 'firebase/firestore';
-import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft } from 'lucide-react';
+import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft, Award, Paperclip } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyALPCEm5iF7wqTtmFV4CFG35fcMsHFOvGo",
@@ -891,25 +891,60 @@ const rutaDePago = p => {
   return nom || id || 'Sin ruta';
 };
 const filasRelacionCobros = pagos => {
-  const filas = (pagos || []).map(p => {
+  const filas = [];
+  (pagos || []).forEach(p => {
     const nums = (p.facturas || []).map(f => f.numero).filter(Boolean);
     const esBs = p.moneda === 'VES';
-    return {
-      codigo: p.clienteId || '-',
-      cliente: p.clienteNombre || '-',
-      facturas: nums.length > 0 ? nums : ['-'],
-      banco: p.banco || '-',
-      referencia: p.referencia || '-',
-      monto: p.montoUsd === null || p.montoUsd === undefined ? null : Number(p.montoUsd) || 0,
-      bs: esBs ? Number(p.montoOriginal) || 0 : null,
-      tasa: esBs ? Number(p.tasa) || 0 : null,
-      fecha: p.fechaReporte || '',
-      fechaPago: p.fechaPago || '',
-      observacion: p.observacion || '',
-      vendedorId: p.vendedorId || '',
-      vendedor: p.vendedorNombre || '',
-      ruta: rutaDePago(p)
-    };
+    if (!Array.isArray(p.lineas)) {
+      filas.push({
+        codigo: p.clienteId || '-',
+        cliente: p.clienteNombre || '-',
+        facturas: nums.length > 0 ? nums : ['-'],
+        banco: p.banco || '-',
+        referencia: p.referencia || '-',
+        monto: p.montoUsd === null || p.montoUsd === undefined ? null : Number(p.montoUsd) || 0,
+        bs: esBs ? Number(p.montoOriginal) || 0 : null,
+        tasa: esBs ? Number(p.tasa) || 0 : null,
+        fecha: p.fechaReporte || '',
+        fechaPago: p.fechaPago || '',
+        observacion: p.observacion || '',
+        vendedorId: p.vendedorId || '',
+        vendedor: p.vendedorNombre || '',
+        ruta: rutaDePago(p)
+      });
+      return;
+    }
+    const clientes = pagoClientes(p);
+    const rets = pagoRetenciones(p);
+    const grupos = clientes.length > 1 ? clientes.map(c => ({
+      codigo: c.idCliente || '-',
+      cliente: c.cliente || '-',
+      facturas: pagoFacturasDeCliente(p, c).map(f => f.numero).filter(Boolean)
+    })) : null;
+    const soloRet = p.lineas.length === 0;
+    const textoRet = rets.length > 0 ? 'Ret.: ' + rets.map(r => `${r.tipo}${r.numero ? ' #' + r.numero : ''} Bs ${money(r.montoOriginal)}`).join('; ') : '';
+    (soloRet ? [null] : p.lineas).forEach((l, i, arr) => {
+      const obs = [p.observacion, i === 0 ? textoRet : '', arr.length > 1 ? `Pago ${i + 1} de ${arr.length} del mismo recibo` : ''].filter(Boolean).join(' · ');
+      filas.push({
+        codigo: p.clienteId || '-',
+        cliente: p.clienteNombre || '-',
+        grupos,
+        facturas: nums.length > 0 ? nums : ['-'],
+        banco: soloRet ? 'RETENCIÓN' : l.banco || '-',
+        referencia: soloRet ? rets.map(r => r.numero).filter(Boolean).join(' / ') || '-' : l.referencia || '-',
+        monto: soloRet ? 0 : l.montoUsd === null || l.montoUsd === undefined ? null : Number(l.montoUsd) || 0,
+        bs: soloRet ? 0 : Number(l.montoOriginal) || 0,
+        tasa: soloRet ? 0 : Number(l.tasa) || 0,
+        fecha: p.fechaReporte || '',
+        fechaPago: soloRet ? rets[0] && rets[0].fecha || p.fechaPago || '' : l.fechaPago || p.fechaPago || '',
+        observacion: obs,
+        soloRet,
+        retBs: soloRet ? pagoTotalRetBs(p) : 0,
+        vendedorId: p.vendedorId || '',
+        vendedor: p.vendedorNombre || '',
+        ruta: rutaDePago(p)
+      });
+    });
   });
   return filas.sort((a, b) => safeGetTime(a.fecha) - safeGetTime(b.fecha));
 };
@@ -2367,6 +2402,337 @@ const CxcFiltros = ({
     className: "text-xs font-bold text-slate-400 whitespace-nowrap ml-auto"
   }, hayFiltro ? `${mostrados} de ${total}` : `${total}`, " clientes"));
 };
+const uidLocal = () => Math.random().toString(36).slice(2, 10);
+const hoyISO = () => new Date().toISOString().slice(0, 10);
+const nuevaLineaPago = () => ({
+  uid: uidLocal(),
+  banco: '',
+  referencia: '',
+  fechaPago: hoyISO(),
+  monto: '',
+  tasa: '',
+  tasaManual: false
+});
+const nuevaRetencion = () => ({
+  uid: uidLocal(),
+  tipo: 'IVA',
+  numero: '',
+  fecha: hoyISO(),
+  monto: ''
+});
+const lineaTieneDatos = l => !!(l.banco || String(l.referencia || '').trim() || String(l.monto || '').trim());
+const claveClientePago = c => normalizeId(c && c.idCliente) || normalizeName(c && c.cliente);
+const RETENCION_TIPOS = ['IVA', 'ISLR', 'Impuesto municipal', 'Otra'];
+const ADJUNTO_MAX_ARCHIVOS = 8;
+const ADJUNTO_MAX_PDF = 600 * 1024;
+const ADJUNTO_MAX_DATAURL = 330000;
+const aKB = bytes => (Number(bytes) || 0) >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((Number(bytes) || 0) / 1024))} KB`;
+const pagoLineas = p => {
+  if (p && Array.isArray(p.lineas)) return p.lineas;
+  return [{
+    banco: p.banco || '',
+    referencia: p.referencia || '',
+    fechaPago: p.fechaPago || '',
+    moneda: p.moneda || 'VES',
+    montoOriginal: p.montoOriginal,
+    tasa: p.tasa,
+    montoUsd: p.montoUsd
+  }];
+};
+const pagoClientes = p => p && Array.isArray(p.clientes) && p.clientes.length > 0 ? p.clientes : [{
+  idCliente: p.clienteId || '',
+  cliente: p.clienteNombre || ''
+}];
+const pagoRetenciones = p => p && Array.isArray(p.retenciones) ? p.retenciones : [];
+const pagoSoportes = p => p && Array.isArray(p.soportes) ? p.soportes : [];
+const pagoClienteTexto = p => {
+  const cs = pagoClientes(p);
+  return cs.length > 1 ? `${cs[0].cliente} (+${cs.length - 1} más)` : cs[0].cliente || '';
+};
+const pagoTextoBuscable = p => [...pagoClientes(p).map(c => `${c.cliente || ''} ${c.idCliente || ''}`), p.banco, p.referencia, p.vendedorNombre, ...pagoLineas(p).map(l => `${l.banco || ''} ${l.referencia || ''}`), ...(p.facturas || []).map(f => f.numero)].join(' ').toLowerCase();
+const leerComoDataUrl = file => new Promise((resolve, reject) => {
+  const fr = new FileReader();
+  fr.onload = () => resolve(String(fr.result));
+  fr.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+  fr.readAsDataURL(file);
+});
+const cargarImagen = src => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => resolve(img);
+  img.onerror = () => reject(new Error('No se pudo abrir la imagen.'));
+  img.src = src;
+});
+const comprimirImagen = async file => {
+  const urlTemp = URL.createObjectURL(file);
+  let img;
+  try {
+    img = await cargarImagen(urlTemp);
+  } finally {
+    URL.revokeObjectURL(urlTemp);
+  }
+  const ancho = img.naturalWidth || img.width,
+    alto = img.naturalHeight || img.height;
+  let escala = Math.min(1, 1400 / Math.max(ancho, alto)),
+    calidad = 0.75,
+    out = '';
+  for (let intento = 0; intento < 6; intento++) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(ancho * escala));
+    canvas.height = Math.max(1, Math.round(alto * escala));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    out = canvas.toDataURL('image/jpeg', calidad);
+    if (out.length <= ADJUNTO_MAX_DATAURL) break;
+    escala *= 0.8;
+    calidad = Math.max(0.5, calidad - 0.08);
+  }
+  if (out.length > ADJUNTO_MAX_DATAURL) throw new Error('La imagen es demasiado grande incluso comprimida.');
+  return {
+    dataUrl: out,
+    mime: 'image/jpeg',
+    size: Math.round(out.length * 0.75)
+  };
+};
+const prepararAdjunto = async file => {
+  const nombre = String(file.name || 'archivo').slice(0, 80);
+  if (/^image\//.test(file.type) || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(nombre)) {
+    const r = await comprimirImagen(file);
+    return {
+      nombre: nombre.replace(/\.[^.]+$/, '') + '.jpg',
+      ...r
+    };
+  }
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(nombre)) {
+    if (file.size > ADJUNTO_MAX_PDF) throw new Error(`el PDF pesa ${aKB(file.size)} y el máximo es ${aKB(ADJUNTO_MAX_PDF)}. Toma una foto del documento o comprímelo.`);
+    const raw = await leerComoDataUrl(file);
+    return {
+      nombre,
+      mime: 'application/pdf',
+      size: file.size,
+      dataUrl: 'data:application/pdf;base64,' + raw.slice(raw.indexOf(',') + 1)
+    };
+  }
+  throw new Error('solo se aceptan fotos (JPG, PNG) o archivos PDF.');
+};
+const abrirAdjunto = dataUrl => {
+  try {
+    const [head, b64] = dataUrl.split(',');
+    const mime = (head.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], {
+      type: mime
+    }));
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    console.error('No se pudo abrir el adjunto', e);
+  }
+};
+const pagoFacturasDeCliente = (p, c) => (p.facturas || []).filter(f => claveClientePago({
+  idCliente: f.clienteId,
+  cliente: f.clienteNombre
+}) === claveClientePago(c));
+const pagoTotalRetBs = p => pagoRetenciones(p).reduce((a, r) => a + (Number(r.montoOriginal) || 0), 0);
+const PagoMontoBloque = ({
+  p,
+  admin
+}) => {
+  const n = pagoLineas(p).length;
+  const sinUsd = p.montoUsd === null || p.montoUsd === undefined;
+  if (n === 0) return React.createElement(React.Fragment, null, React.createElement("p", {
+    className: "font-black text-purple-800 text-lg"
+  }, "Bs ", money(pagoTotalRetBs(p))), React.createElement("p", {
+    className: "text-[10px] font-bold text-slate-400"
+  }, "Solo retención"));
+  if (n > 1) return React.createElement(React.Fragment, null, sinUsd ? React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "Bs ", money(p.montoOriginal)) : React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "$", money(p.montoUsd)), React.createElement("p", {
+    className: "text-[10px] font-bold text-slate-400"
+  }, sinUsd ? `${n} pagos · alguno sin tasa` : `Bs ${money(p.montoOriginal)} · ${n} pagos`));
+  if (admin) return React.createElement(React.Fragment, null, React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
+    className: "text-[10px] font-bold text-slate-400"
+  }, "Bs ", money(p.montoOriginal), " @ ", money(p.tasa)));
+  return React.createElement(React.Fragment, null, sinUsd ? React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "Bs ", money(p.montoOriginal)) : React.createElement("p", {
+    className: "font-black text-blue-900 text-lg"
+  }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
+    className: "text-[10px] font-bold text-slate-400"
+  }, Number(p.tasa) > 0 ? `Bs ${money(p.montoOriginal)} @ ${money(p.tasa)}` : 'Sin tasa cargada'));
+};
+const PagoDetalle = ({
+  p,
+  onVerSoportes
+}) => {
+  const lineas = pagoLineas(p),
+    clientes = pagoClientes(p),
+    rets = pagoRetenciones(p),
+    sops = pagoSoportes(p);
+  if (lineas.length === 1 && clientes.length === 1 && rets.length === 0 && sops.length === 0) return null;
+  const facturasDe = c => pagoFacturasDeCliente(p, c);
+  return React.createElement("div", {
+    className: "mt-3 space-y-2"
+  }, lineas.length > 1 && React.createElement("div", {
+    className: "rounded-xl border border-slate-100 overflow-hidden"
+  }, React.createElement("p", {
+    className: "bg-slate-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500"
+  }, lineas.length, " pagos en este recibo"), React.createElement("div", {
+    className: "divide-y divide-slate-50"
+  }, lineas.map((l, i) => React.createElement("div", {
+    key: i,
+    className: "px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]"
+  }, React.createElement("span", {
+    className: "font-bold text-slate-700"
+  }, l.banco, " · Ref. ", l.referencia, " · ", safeFormatDate(l.fechaPago)), React.createElement("span", {
+    className: "font-black text-blue-900"
+  }, "Bs ", money(l.montoOriginal), l.montoUsd === null || l.montoUsd === undefined ? React.createElement("span", {
+    className: "text-amber-600 font-bold"
+  }, " · sin tasa") : React.createElement("span", {
+    className: "text-slate-400 font-bold"
+  }, " · $", money(l.montoUsd))))))), lineas.length === 0 && React.createElement("p", {
+    className: "text-[11px] font-bold text-slate-500"
+  }, "Solo retenciones: este reporte no incluye depósitos."), clientes.length > 1 && React.createElement("div", {
+    className: "rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2"
+  }, React.createElement("p", {
+    className: "text-[10px] font-black uppercase tracking-wider text-blue-700 mb-1"
+  }, "Facturas de ", clientes.length, " clientes"), clientes.map((c, i) => React.createElement("div", {
+    key: i,
+    className: "flex flex-wrap items-center gap-1.5 text-[11px] py-0.5"
+  }, React.createElement("span", {
+    className: "font-bold text-slate-700"
+  }, React.createElement("span", {
+    className: "font-mono text-slate-400 mr-1"
+  }, c.idCliente), c.cliente, ":"), facturasDe(c).map((f, j) => React.createElement("span", {
+    key: j,
+    className: "text-[10px] font-bold bg-white border border-blue-100 text-slate-600 px-1.5 py-0.5 rounded font-mono"
+  }, f.numero))))), rets.length > 0 && React.createElement("div", {
+    className: "rounded-xl border border-purple-100 bg-purple-50/50 px-3 py-2"
+  }, React.createElement("p", {
+    className: "text-[10px] font-black uppercase tracking-wider text-purple-700 mb-1"
+  }, "Retenciones"), rets.map((r, i) => React.createElement("div", {
+    key: i,
+    className: "flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 py-0.5"
+  }, React.createElement("span", null, r.tipo, r.numero ? ` · Comp. ${r.numero}` : '', r.fecha ? ` · ${safeFormatDate(r.fecha)}` : ''), React.createElement("span", {
+    className: "font-black text-purple-800"
+  }, "Bs ", money(r.montoOriginal), r.montoUsd === null || r.montoUsd === undefined ? '' : ` · $${money(r.montoUsd)}`)))), sops.length > 0 && onVerSoportes && React.createElement("button", {
+    onClick: () => onVerSoportes(p),
+    className: "text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-800 hover:text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+  }, React.createElement(Paperclip, {
+    size: 14
+  }), " Ver soportes (", sops.length, ")"));
+};
+const PagoSoportesModal = ({
+  pago,
+  db,
+  getCollectionPath,
+  onClose
+}) => {
+  const soportes = pagoSoportes(pago);
+  const [datos, setDatos] = useState({});
+  const [fallos, setFallos] = useState({});
+  const [cargando, setCargando] = useState(true);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const d = {},
+        f = {};
+      await Promise.all(soportes.map(async sp => {
+        try {
+          const snap = await getDoc(doc(db, getCollectionPath('pagosAdjuntos'), sp.id));
+          if (snap.exists() && snap.data().dataUrl) d[sp.id] = snap.data().dataUrl;else f[sp.id] = 'No se encontró el archivo: puede que aún se esté enviando.';
+        } catch (err) {
+          console.error('No se pudo leer el adjunto', err);
+          f[sp.id] = 'No se pudo cargar el archivo.';
+        }
+      }));
+      if (vivo) {
+        setDatos(d);
+        setFallos(f);
+        setCargando(false);
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [pago.id]);
+  const grupos = [{
+    titulo: 'Soportes de pago',
+    lista: soportes.filter(x => x.tipo !== 'retencion')
+  }, {
+    titulo: 'Documentos de retención',
+    lista: soportes.filter(x => x.tipo === 'retencion')
+  }].filter(g => g.lista.length > 0);
+  return React.createElement("div", {
+    className: "fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+  }, React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+  }, React.createElement("div", {
+    className: "p-4 border-b border-slate-200 flex justify-between items-center gap-3 shrink-0"
+  }, React.createElement("div", {
+    className: "min-w-0"
+  }, React.createElement("h3", {
+    className: "font-black text-slate-800 flex items-center gap-2"
+  }, React.createElement(Paperclip, {
+    size: 18,
+    className: "text-orange-500"
+  }), " Soportes del recibo"), React.createElement("p", {
+    className: "text-[11px] text-slate-500 font-medium truncate"
+  }, pagoClienteTexto(pago), " · Ref. ", pago.referencia)), React.createElement("button", {
+    onClick: onClose,
+    className: "p-2 hover:bg-slate-100 rounded-xl transition-colors shrink-0"
+  }, React.createElement(X, {
+    size: 20
+  }))), React.createElement("div", {
+    className: "p-4 overflow-y-auto space-y-5"
+  }, cargando && React.createElement("p", {
+    className: "text-center text-sm text-slate-400 font-medium py-8"
+  }, "Cargando archivos…"), !cargando && grupos.map(g => React.createElement("div", {
+    key: g.titulo
+  }, React.createElement("p", {
+    className: "text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2"
+  }, g.titulo), React.createElement("div", {
+    className: "grid grid-cols-1 sm:grid-cols-2 gap-3"
+  }, g.lista.map(sp => {
+    const url = datos[sp.id];
+    const esImg = /^image\//.test(sp.mime || '');
+    return React.createElement("div", {
+      key: sp.id,
+      className: "border border-slate-100 rounded-xl overflow-hidden bg-slate-50"
+    }, url && esImg && React.createElement("img", {
+      src: url,
+      alt: sp.nombre,
+      className: "w-full max-h-72 object-contain bg-white cursor-zoom-in",
+      onClick: () => abrirAdjunto(url)
+    }), url && !esImg && React.createElement("div", {
+      className: "h-32 flex flex-col items-center justify-center text-slate-500"
+    }, React.createElement(FileText, {
+      size: 36
+    }), React.createElement("span", {
+      className: "text-xs font-bold mt-1"
+    }, "PDF")), !url && React.createElement("div", {
+      className: "h-32 flex items-center justify-center text-center text-xs text-slate-400 font-medium px-4"
+    }, fallos[sp.id] || 'Sin archivo.'), React.createElement("div", {
+      className: "px-3 py-2 flex items-center justify-between gap-2 border-t border-slate-100 bg-white"
+    }, React.createElement("div", {
+      className: "min-w-0"
+    }, React.createElement("p", {
+      className: "text-xs font-bold text-slate-700 truncate"
+    }, sp.nombre), React.createElement("p", {
+      className: "text-[10px] text-slate-400 font-medium"
+    }, aKB(sp.size), sp.tipo === 'retencion' && sp.retIdx !== null && sp.retIdx !== undefined && pagoRetenciones(pago)[sp.retIdx] ? ` · ${pagoRetenciones(pago)[sp.retIdx].tipo}` : '')), url && React.createElement("button", {
+      onClick: () => abrirAdjunto(url),
+      className: "text-[11px] font-bold text-blue-600 hover:text-blue-800 shrink-0"
+    }, "Abrir")));
+  })))))));
+};
 const PagoEstadoChip = ({
   estado
 }) => {
@@ -2389,63 +2755,202 @@ const PagosVendedorView = ({
 }) => {
   const [activeTab, setActiveTab] = useState('reportar');
   const [isSaving, setIsSaving] = useState(false);
+  const [clientesSel, setClientesSel] = useState([]);
+  const [buscandoCliente, setBuscandoCliente] = useState(true);
   const [clienteBusqueda, setClienteBusqueda] = useState('');
-  const [clienteSel, setClienteSel] = useState(null);
-  const [banco, setBanco] = useState('');
-  const [referencia, setReferencia] = useState('');
-  const [fechaPago, setFechaPago] = useState(() => new Date().toISOString().slice(0, 10));
-  const moneda = 'VES';
-  const [montoOriginal, setMontoOriginal] = useState('');
-  const [tasa, setTasa] = useState('');
+  const [facturaManual, setFacturaManual] = useState({});
+  const [lineas, setLineas] = useState(() => [nuevaLineaPago()]);
+  const [retenciones, setRetenciones] = useState([]);
+  const [adjuntos, setAdjuntos] = useState([]);
+  const [procesandoArchivos, setProcesandoArchivos] = useState(false);
   const [observacion, setObservacion] = useState('');
-  const [facturasSel, setFacturasSel] = useState([]);
-  const [facturaManual, setFacturaManual] = useState('');
   const [histBusqueda, setHistBusqueda] = useState('');
   const [histEstado, setHistEstado] = useState('ALL');
+  const [soportesDe, setSoportesDe] = useState(null);
   const miCartera = useMemo(() => {
     const esMando = currentUser.rol === 'admin' || currentUser.rol === 'gerente';
     return esMando ? cartera : filtrarCarteraPorVendedor(cartera, currentUser.id);
   }, [cartera, currentUser]);
-  const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, clienteBusqueda)).slice(0, 30), [miCartera, clienteBusqueda]);
+  const clavesElegidas = useMemo(() => new Set(clientesSel.map(c => claveClientePago(c.cliente))), [clientesSel]);
+  const clientesFiltrados = useMemo(() => miCartera.filter(c => !clavesElegidas.has(claveClientePago(c)) && clienteCoincide(c, clienteBusqueda)).slice(0, 30), [miCartera, clienteBusqueda, clavesElegidas]);
   const idxTasas = useMemo(() => indexarTasas(tasas), [tasas]);
+  const firmaFechas = lineas.map(l => `${l.uid}|${l.fechaPago}|${l.tasaManual ? 1 : 0}`).join(',');
   useEffect(() => {
-    if (moneda !== 'VES') return;
-    const r = buscarTasaVigente(idxTasas, fechaPago);
-    setTasa(r ? String(r.tasa) : '');
-  }, [fechaPago, moneda, idxTasas]);
-  const tasaInfo = useMemo(() => moneda === 'VES' ? buscarTasaVigente(idxTasas, fechaPago) : null, [moneda, fechaPago, idxTasas]);
+    setLineas(prev => {
+      let cambio = false;
+      const sig = prev.map(l => {
+        if (l.tasaManual) return l;
+        const r = buscarTasaVigente(idxTasas, l.fechaPago);
+        const t = r ? String(r.tasa) : '';
+        if (t === l.tasa) return l;
+        cambio = true;
+        return {
+          ...l,
+          tasa: t
+        };
+      });
+      return cambio ? sig : prev;
+    });
+  }, [idxTasas, firmaFechas]);
   const buscarDeuda = useMemo(() => crearBuscadorDeuda(cxc), [cxc]);
-  const clienteDeuda = useMemo(() => buscarDeuda(clienteSel), [buscarDeuda, clienteSel]);
-  const facturasCliente = clienteDeuda && clienteDeuda.facturas || [];
-  const montoUsd = useMemo(() => pagoMontoUsd(moneda, montoOriginal, tasa), [moneda, montoOriginal, tasa]);
+  const tasaDeFecha = fecha => {
+    const r = buscarTasaVigente(idxTasas, fecha);
+    return r && Number(r.tasa) > 0 ? Number(r.tasa) : null;
+  };
+  const resumenPagos = useMemo(() => {
+    const validas = lineas.filter(l => Number(l.monto) > 0);
+    const usds = validas.map(l => pagoMontoUsd('VES', l.monto, l.tasa));
+    return {
+      n: validas.length,
+      bs: validas.reduce((a, l) => a + Number(l.monto), 0),
+      usd: usds.reduce((a, u) => a + Math.round((u || 0) * 100) / 100, 0),
+      sinTasa: usds.some(u => u === null)
+    };
+  }, [lineas]);
+  const resumenRet = useMemo(() => {
+    const validas = retenciones.filter(r => Number(r.monto) > 0);
+    const usds = validas.map(r => {
+      const t = tasaDeFecha(r.fecha);
+      return t ? Number(r.monto) / t : null;
+    });
+    return {
+      n: validas.length,
+      bs: validas.reduce((a, r) => a + Number(r.monto), 0),
+      usd: usds.reduce((a, u) => a + Math.round((u || 0) * 100) / 100, 0),
+      sinTasa: usds.some(u => u === null)
+    };
+  }, [retenciones, idxTasas]);
+  const facturasPorCliente = useMemo(() => {
+    const m = {};
+    clientesSel.forEach(cs => {
+      m[claveClientePago(cs.cliente)] = (buscarDeuda(cs.cliente) || {}).facturas || [];
+    });
+    return m;
+  }, [clientesSel, buscarDeuda]);
+  const resumenFacturas = useMemo(() => {
+    let n = 0,
+      saldo = 0;
+    clientesSel.forEach(cs => {
+      const facs = facturasPorCliente[claveClientePago(cs.cliente)] || [];
+      cs.facturas.forEach(num => {
+        n++;
+        const f = facs.find(x => x.numero === num);
+        if (f) saldo += Number(f.saldo) || 0;
+      });
+    });
+    return {
+      n,
+      saldo
+    };
+  }, [clientesSel, facturasPorCliente]);
   const limpiar = () => {
-    setClienteSel(null);
+    setClientesSel([]);
+    setBuscandoCliente(true);
     setClienteBusqueda('');
-    setBanco('');
-    setReferencia('');
-    setFechaPago(new Date().toISOString().slice(0, 10));
-    setMontoOriginal('');
-    setTasa('');
+    setFacturaManual({});
+    setLineas([nuevaLineaPago()]);
+    setRetenciones([]);
+    setAdjuntos([]);
     setObservacion('');
-    setFacturasSel([]);
-    setFacturaManual('');
   };
-  const toggleFactura = numero => {
-    setFacturasSel(prev => prev.includes(numero) ? prev.filter(n => n !== numero) : [...prev, numero]);
+  const agregarCliente = c => {
+    setClientesSel(prev => prev.some(x => claveClientePago(x.cliente) === claveClientePago(c)) ? prev : [...prev, {
+      cliente: c,
+      facturas: []
+    }]);
+    setBuscandoCliente(false);
+    setClienteBusqueda('');
   };
-  const agregarFacturaManual = () => {
-    const num = facturaManual.trim();
+  const quitarCliente = clave => {
+    setClientesSel(prev => {
+      const sig = prev.filter(x => claveClientePago(x.cliente) !== clave);
+      if (sig.length === 0) setBuscandoCliente(true);
+      return sig;
+    });
+  };
+  const toggleFactura = (clave, numero) => {
+    setClientesSel(prev => prev.map(x => claveClientePago(x.cliente) !== clave ? x : {
+      ...x,
+      facturas: x.facturas.includes(numero) ? x.facturas.filter(n => n !== numero) : [...x.facturas, numero]
+    }));
+  };
+  const agregarFacturaManual = clave => {
+    const num = (facturaManual[clave] || '').trim();
     if (!num) return;
-    setFacturasSel(prev => prev.includes(num) ? prev : [...prev, num]);
-    setFacturaManual('');
+    setClientesSel(prev => prev.map(x => claveClientePago(x.cliente) !== clave || x.facturas.includes(num) ? x : {
+      ...x,
+      facturas: [...x.facturas, num]
+    }));
+    setFacturaManual(prev => ({
+      ...prev,
+      [clave]: ''
+    }));
   };
+  const actualizarLinea = (uid, patch) => setLineas(prev => prev.map(l => l.uid === uid ? {
+    ...l,
+    ...patch
+  } : l));
+  const agregarLinea = () => setLineas(prev => [...prev, nuevaLineaPago()]);
+  const quitarLinea = uid => setLineas(prev => prev.length > 1 ? prev.filter(l => l.uid !== uid) : prev);
+  const agregarRetencion = () => setRetenciones(prev => [...prev, nuevaRetencion()]);
+  const actualizarRetencion = (uid, patch) => setRetenciones(prev => prev.map(r => r.uid === uid ? {
+    ...r,
+    ...patch
+  } : r));
+  const quitarRetencion = uid => {
+    setRetenciones(prev => prev.filter(r => r.uid !== uid));
+    setAdjuntos(prev => prev.filter(a => a.retUid !== uid));
+  };
+  const agregarArchivos = async (fileList, tipo, retUid) => {
+    const archivos = Array.from(fileList || []);
+    if (archivos.length === 0) return;
+    setProcesandoArchivos(true);
+    const nuevos = [],
+      problemas = [];
+    let cupo = ADJUNTO_MAX_ARCHIVOS - adjuntos.length;
+    for (const f of archivos) {
+      if (cupo <= 0) {
+        problemas.push(`Máximo ${ADJUNTO_MAX_ARCHIVOS} archivos por reporte.`);
+        break;
+      }
+      try {
+        nuevos.push({
+          uid: uidLocal(),
+          tipo,
+          retUid: retUid || null,
+          ...(await prepararAdjunto(f))
+        });
+        cupo--;
+      } catch (err) {
+        problemas.push(`${f.name || 'Archivo'}: ${err.message}`);
+      }
+    }
+    setAdjuntos(prev => [...prev, ...nuevos]);
+    setProcesandoArchivos(false);
+    if (problemas.length > 0) openModal('alert', null, 'Archivos no agregados', problemas.join(' '), true);
+  };
+  const quitarAdjunto = uid => setAdjuntos(prev => prev.filter(a => a.uid !== uid));
   const validar = () => {
-    if (!clienteSel) return 'Selecciona el cliente que hizo el pago.';
-    if (!banco) return 'Selecciona el banco.';
-    if (!referencia.trim()) return 'Escribe el número de referencia del pago.';
-    if (!fechaPago) return 'Indica la fecha del pago.';
-    if (!(Number(montoOriginal) > 0)) return 'El monto debe ser mayor a cero.';
-    if (facturasSel.length === 0) return 'Marca al menos una factura o nota que afecta este pago.';
+    if (clientesSel.length === 0) return 'Selecciona el cliente que hizo el pago.';
+    const sinFacturas = clientesSel.find(c => c.facturas.length === 0);
+    if (sinFacturas) return `Marca al menos una factura o nota de ${sinFacturas.cliente.cliente}, o quita a ese cliente del recibo.`;
+    const usadas = lineas.filter(lineaTieneDatos);
+    if (usadas.length === 0 && retenciones.length === 0) return 'Agrega al menos un pago (banco, referencia y monto) o una retención.';
+    for (const l of usadas) {
+      const pre = lineas.length > 1 ? `Pago ${lineas.indexOf(l) + 1}: ` : '';
+      if (!l.banco) return pre + 'Selecciona el banco.';
+      if (!String(l.referencia || '').trim()) return pre + 'Escribe el número de referencia del pago.';
+      if (!l.fechaPago) return pre + 'Indica la fecha del pago.';
+      if (!(Number(l.monto) > 0)) return pre + 'El monto debe ser mayor a cero.';
+    }
+    for (let i = 0; i < retenciones.length; i++) {
+      const r = retenciones[i];
+      const pre = `Retención ${i + 1}: `;
+      if (!r.tipo) return pre + 'Selecciona el tipo de retención.';
+      if (!r.fecha) return pre + 'Indica la fecha.';
+      if (!(Number(r.monto) > 0)) return pre + 'El monto debe ser mayor a cero.';
+    }
+    if (procesandoArchivos) return 'Espera a que termine de cargarse el archivo adjunto.';
     return null;
   };
   const enviar = async () => {
@@ -2456,26 +2961,93 @@ const PagosVendedorView = ({
     }
     setIsSaving(true);
     try {
+      const lineasOk = lineas.filter(lineaTieneDatos).map(l => {
+        const usd = pagoMontoUsd('VES', l.monto, l.tasa);
+        return {
+          banco: l.banco,
+          referencia: String(l.referencia).trim(),
+          fechaPago: l.fechaPago,
+          moneda: 'VES',
+          montoOriginal: Number(l.monto),
+          tasa: Number(l.tasa) > 0 ? Number(l.tasa) : null,
+          montoUsd: usd === null ? null : Number(usd.toFixed(2))
+        };
+      });
+      const retOk = retenciones.map(r => {
+        const t = tasaDeFecha(r.fecha);
+        return {
+          tipo: r.tipo,
+          numero: String(r.numero || '').trim(),
+          fecha: r.fecha,
+          moneda: 'VES',
+          montoOriginal: Number(r.monto),
+          tasa: t,
+          montoUsd: t ? Number((Number(r.monto) / t).toFixed(2)) : null
+        };
+      });
+      const totalBs = lineasOk.reduce((a, l) => a + l.montoOriginal, 0);
+      const sinTasa = lineasOk.some(l => l.montoUsd === null);
+      const totalUsd = sinTasa ? null : Number(lineasOk.reduce((a, l) => a + l.montoUsd, 0).toFixed(2));
+      const bancos = Array.from(new Set(lineasOk.map(l => l.banco)));
+      const primero = clientesSel[0].cliente;
+      const pagoRef = doc(collection(db, getCollectionPath('pagos')));
+      const soportes = adjuntos.map((a, i) => {
+        const idx = a.tipo === 'retencion' ? retenciones.findIndex(r => r.uid === a.retUid) : -1;
+        return {
+          id: `${pagoRef.id}_${i + 1}`,
+          tipo: a.tipo,
+          retIdx: idx >= 0 ? idx : null,
+          nombre: a.nombre,
+          mime: a.mime,
+          size: a.size
+        };
+      });
+      const ahora = new Date().toISOString();
       const pago = {
         vendedorId: currentUser.id,
         vendedorNombre: currentUser.nombre || '',
-        clienteId: clienteSel.idCliente || '',
-        clienteNombre: clienteSel.cliente || '',
-        banco,
-        referencia: referencia.trim(),
-        fechaPago,
-        moneda,
-        montoOriginal: Number(montoOriginal),
-        tasa: moneda === 'VES' && Number(tasa) > 0 ? Number(tasa) : null,
-        montoUsd: montoUsd === null ? null : Number(montoUsd.toFixed(2)),
-        facturas: facturasSel.map(n => ({
-          numero: n
+        clienteId: primero.idCliente || '',
+        clienteNombre: primero.cliente || '',
+        clientes: clientesSel.map(c => ({
+          idCliente: c.cliente.idCliente || '',
+          cliente: c.cliente.cliente || ''
         })),
+        banco: lineasOk.length === 0 ? 'Retención' : bancos.length === 1 ? bancos[0] : bancos.join(' + '),
+        referencia: lineasOk.length === 0 ? retOk.map(r => r.numero).filter(Boolean).join(' / ') || 'Solo retención' : lineasOk.map(l => l.referencia).join(' / '),
+        fechaPago: lineasOk.length > 0 ? lineasOk[0].fechaPago : retOk[0] ? retOk[0].fecha : hoyISO(),
+        moneda: 'VES',
+        montoOriginal: Number(totalBs.toFixed(2)),
+        tasa: lineasOk.length === 1 ? lineasOk[0].tasa : lineasOk.length > 1 && totalUsd !== null && totalUsd > 0 ? Number((totalBs / totalUsd).toFixed(4)) : null,
+        montoUsd: lineasOk.length === 0 ? 0 : totalUsd,
+        lineas: lineasOk,
+        retenciones: retOk,
+        retencionesUsd: retOk.some(r => r.montoUsd === null) ? null : Number(retOk.reduce((a, r) => a + r.montoUsd, 0).toFixed(2)),
+        facturas: clientesSel.flatMap(c => c.facturas.map(n => ({
+          numero: n,
+          clienteId: c.cliente.idCliente || '',
+          clienteNombre: c.cliente.cliente || ''
+        }))),
+        soportes,
         observacion: observacion.trim(),
         estado: 'Pendiente',
-        fechaReporte: new Date().toISOString()
+        fechaReporte: ahora
       };
-      await addDoc(collection(db, getCollectionPath('pagos')), pago);
+      const lote = writeBatch(db);
+      lote.set(pagoRef, pago);
+      adjuntos.forEach((a, i) => {
+        lote.set(doc(db, getCollectionPath('pagosAdjuntos'), soportes[i].id), {
+          pagoId: pagoRef.id,
+          tipo: a.tipo,
+          retIdx: soportes[i].retIdx,
+          nombre: a.nombre,
+          mime: a.mime,
+          size: a.size,
+          dataUrl: a.dataUrl,
+          vendedorId: currentUser.id,
+          fecha: ahora
+        });
+      });
+      await lote.commit();
       limpiar();
       setActiveTab('historial');
       const confirmado = await esperarConfirmacionServidor(db);
@@ -2486,14 +3058,15 @@ const PagosVendedorView = ({
       }
     } catch (err) {
       console.error('Error al reportar pago', err);
-      openModal('alert', null, 'Error', 'No se pudo reportar el pago. Verifica tu conexión e intenta de nuevo.', true);
+      const sinPermiso = err && err.code === 'permission-denied' && adjuntos.length > 0;
+      openModal('alert', null, 'Error', sinPermiso ? 'El servidor no permitió guardar los archivos adjuntos, así que el reporte no se envió. Puedes enviarlo sin archivos y avisar al administrador.' : 'No se pudo reportar el pago. Verifica tu conexión e intenta de nuevo.', true);
     } finally {
       setIsSaving(false);
     }
   };
   const misPagos = useMemo(() => {
     const q = histBusqueda.trim().toLowerCase();
-    return (pagos || []).filter(p => String(p.vendedorId) === String(currentUser.id)).filter(p => histEstado === 'ALL' || (p.estado || 'Pendiente') === histEstado).filter(p => !q || (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q))).sort((a, b) => safeGetTime(b.fechaReporte) - safeGetTime(a.fechaReporte));
+    return (pagos || []).filter(p => String(p.vendedorId) === String(currentUser.id)).filter(p => histEstado === 'ALL' || (p.estado || 'Pendiente') === histEstado).filter(p => !q || pagoTextoBuscable(p).includes(q) || (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q))).sort((a, b) => safeGetTime(b.fechaReporte) - safeGetTime(a.fechaReporte));
   }, [pagos, currentUser.id, histBusqueda, histEstado]);
   const resumen = useMemo(() => {
     const mios = (pagos || []).filter(p => String(p.vendedorId) === String(currentUser.id));
@@ -2506,6 +3079,51 @@ const PagosVendedorView = ({
   }, [pagos, currentUser.id]);
   const inputCls = "w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-blue-500 transition-colors font-medium";
   const labelCls = "text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5 block";
+  const pasoCls = "text-sm font-black text-blue-900 flex items-center gap-2 mb-1";
+  const pasoNumCls = "w-6 h-6 rounded-full bg-blue-900 text-white text-xs font-black flex items-center justify-center shrink-0";
+  const agregarCls = "mt-3 w-full border-2 border-dashed rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors";
+  const listaAdjuntos = lista => lista.length === 0 ? null : React.createElement("div", {
+    className: "grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2"
+  }, lista.map(a => React.createElement("div", {
+    key: a.uid,
+    className: "flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2"
+  }, /^image\//.test(a.mime) ? React.createElement("img", {
+    src: a.dataUrl,
+    alt: "",
+    className: "w-12 h-12 object-cover rounded-lg shrink-0"
+  }) : React.createElement("div", {
+    className: "w-12 h-12 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0"
+  }, React.createElement(FileText, {
+    size: 22
+  })), React.createElement("div", {
+    className: "min-w-0 flex-1"
+  }, React.createElement("p", {
+    className: "text-xs font-bold text-slate-700 truncate"
+  }, a.nombre), React.createElement("p", {
+    className: "text-[10px] text-slate-400 font-medium"
+  }, aKB(a.size))), React.createElement("button", {
+    onClick: () => quitarAdjunto(a.uid),
+    className: "shrink-0 p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors",
+    title: "Quitar archivo"
+  }, React.createElement(X, {
+    size: 16
+  })))));
+  const archivosLlenos = adjuntos.length >= ADJUNTO_MAX_ARCHIVOS;
+  const selectorArchivos = (tipo, retUid, texto) => React.createElement("label", {
+    className: `inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed text-sm font-bold transition-colors ${procesandoArchivos || archivosLlenos ? 'opacity-50 pointer-events-none border-slate-200 text-slate-400' : 'cursor-pointer border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50'}`
+  }, React.createElement(Paperclip, {
+    size: 16
+  }), " ", procesandoArchivos ? 'Procesando…' : archivosLlenos ? 'Máximo de archivos alcanzado' : texto, React.createElement("input", {
+    type: "file",
+    accept: "image/*,application/pdf,.pdf",
+    multiple: true,
+    className: "hidden",
+    onChange: e => {
+      const elegidos = Array.from(e.target.files || []);
+      e.target.value = '';
+      agregarArchivos(elegidos, tipo, retUid);
+    }
+  }));
   return React.createElement("div", {
     className: "space-y-6 animate-fadeIn p-4 md:p-8"
   }, React.createElement("div", {
@@ -2532,28 +3150,104 @@ const PagosVendedorView = ({
     className: "text-orange-500"
   }), " Reportar un Pago"), React.createElement("p", {
     className: "text-slate-500 text-sm font-medium mt-1"
-  }, "Un depósito puede cubrir varias facturas. El administrador lo revisará y lo marcará como procesado.")), React.createElement("div", {
-    className: "p-6 space-y-6"
-  }, React.createElement("div", null, React.createElement("label", {
+  }, "Un recibo puede incluir varios pagos y facturas de uno o varios clientes. El administrador lo revisará y lo marcará como procesado.")), React.createElement("div", {
+    className: "p-6 space-y-8"
+  }, React.createElement("div", null, React.createElement("p", {
+    className: pasoCls
+  }, React.createElement("span", {
+    className: pasoNumCls
+  }, "1"), " Cliente y facturas que paga"), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mb-3"
+  }, "Si el recibo cubre facturas de más de un cliente, agrega a cada uno y marca sus facturas."), React.createElement("div", {
+    className: "space-y-3"
+  }, clientesSel.map(cs => {
+    const clave = claveClientePago(cs.cliente);
+    const facs = facturasPorCliente[clave] || [];
+    const manuales = cs.facturas.filter(n => !facs.some(f => f.numero === n));
+    return React.createElement("div", {
+      key: clave,
+      className: "border-2 border-blue-100 rounded-2xl overflow-hidden"
+    }, React.createElement("div", {
+      className: "flex items-center justify-between gap-3 bg-blue-50 px-4 py-3"
+    }, React.createElement("div", {
+      className: "min-w-0"
+    }, React.createElement("p", {
+      className: "font-black text-blue-900 text-sm truncate"
+    }, cs.cliente.cliente), React.createElement("p", {
+      className: "text-[11px] text-blue-600 font-bold font-mono"
+    }, cs.cliente.idCliente || 'Sin código')), React.createElement("button", {
+      onClick: () => quitarCliente(clave),
+      className: "shrink-0 text-blue-600 hover:text-white hover:bg-blue-600 rounded-lg p-2 transition-colors",
+      title: "Quitar este cliente"
+    }, React.createElement(X, {
+      size: 16
+    }))), React.createElement("p", {
+      className: "px-4 pt-3 pb-1 text-[11px] font-black uppercase tracking-wider text-slate-500"
+    }, "Facturas o notas que afecta este pago"), React.createElement("div", {
+      className: "divide-y divide-slate-50"
+    }, facs.map((f, i) => {
+      const marcada = cs.facturas.includes(f.numero);
+      return React.createElement("label", {
+        key: i,
+        className: `flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${marcada ? 'bg-blue-50' : 'hover:bg-slate-50'}`
+      }, React.createElement("input", {
+        type: "checkbox",
+        checked: marcada,
+        onChange: () => toggleFactura(clave, f.numero),
+        className: "w-5 h-5 accent-blue-600 cursor-pointer shrink-0"
+      }), React.createElement("div", {
+        className: "flex-1 min-w-0"
+      }, React.createElement("p", {
+        className: "text-sm font-bold text-slate-800 font-mono truncate"
+      }, f.numero), React.createElement("p", {
+        className: "text-[11px] text-slate-500 font-medium"
+      }, safeFormatDate(f.fecha), " · Saldo $", money(f.saldo))));
+    }), facs.length === 0 && React.createElement("p", {
+      className: "px-4 py-5 text-center text-sm text-slate-400 font-medium"
+    }, "Este cliente no tiene facturas pendientes cargadas. Agrégala manualmente abajo."), manuales.map(n => React.createElement("div", {
+      key: n,
+      className: "flex items-center gap-3 px-4 py-3 bg-blue-50"
+    }, React.createElement("button", {
+      onClick: () => toggleFactura(clave, n),
+      className: "text-red-500 hover:text-red-700 shrink-0",
+      title: "Quitar"
+    }, React.createElement(X, {
+      size: 16
+    })), React.createElement("div", {
+      className: "flex-1 min-w-0"
+    }, React.createElement("p", {
+      className: "text-sm font-bold text-slate-800 font-mono truncate"
+    }, n), React.createElement("p", {
+      className: "text-[11px] text-slate-500 font-medium"
+    }, "Agregada manualmente"))))), React.createElement("div", {
+      className: "flex gap-2 p-3 bg-slate-50 border-t border-slate-100"
+    }, React.createElement("input", {
+      type: "text",
+      placeholder: "Otra factura o nota (número)...",
+      value: facturaManual[clave] || '',
+      onChange: e => setFacturaManual(prev => ({
+        ...prev,
+        [clave]: e.target.value
+      })),
+      onKeyDown: e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          agregarFacturaManual(clave);
+        }
+      },
+      className: inputCls + ' flex-1 bg-white'
+    }), React.createElement("button", {
+      onClick: () => agregarFacturaManual(clave),
+      disabled: !(facturaManual[clave] || '').trim(),
+      className: "px-4 bg-white border-2 border-slate-200 hover:bg-blue-600 hover:border-blue-600 hover:text-white disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-slate-200 disabled:hover:text-slate-600 text-slate-600 font-bold rounded-xl transition-colors flex items-center gap-1 text-sm"
+    }, React.createElement(Plus, {
+      size: 16
+    }), " Agregar")), cs.facturas.length > 0 && React.createElement("p", {
+      className: "px-4 py-2 text-[11px] font-bold text-slate-500 border-t border-slate-100"
+    }, cs.facturas.length, " documento", cs.facturas.length === 1 ? '' : 's', " marcado", cs.facturas.length === 1 ? '' : 's'));
+  }), buscandoCliente || clientesSel.length === 0 ? React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Cliente"), clienteSel ? React.createElement("div", {
-    className: "flex items-center justify-between gap-3 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-3"
-  }, React.createElement("div", {
-    className: "min-w-0"
-  }, React.createElement("p", {
-    className: "font-black text-blue-900 text-sm truncate"
-  }, clienteSel.cliente), React.createElement("p", {
-    className: "text-[11px] text-blue-600 font-bold font-mono"
-  }, clienteSel.idCliente || 'Sin código')), React.createElement("button", {
-    onClick: () => {
-      setClienteSel(null);
-      setFacturasSel([]);
-    },
-    className: "shrink-0 text-blue-600 hover:text-white hover:bg-blue-600 rounded-lg p-2 transition-colors",
-    title: "Cambiar cliente"
-  }, React.createElement(X, {
-    size: 16
-  }))) : React.createElement(React.Fragment, null, React.createElement("div", {
+  }, clientesSel.length === 0 ? 'Cliente' : 'Agregar otro cliente'), React.createElement("div", {
     className: "relative"
   }, React.createElement(Search, {
     className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400",
@@ -2568,10 +3262,7 @@ const PagosVendedorView = ({
     className: "mt-2 max-h-48 overflow-y-auto border border-slate-100 rounded-xl divide-y divide-slate-50"
   }, clientesFiltrados.map((c, i) => React.createElement("button", {
     key: i,
-    onClick: () => {
-      setClienteSel(c);
-      setFacturasSel([]);
-    },
+    onClick: () => agregarCliente(c),
     className: "w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center gap-2.5"
   }, React.createElement("span", {
     className: "shrink-0 text-[11px] font-black font-mono text-blue-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5"
@@ -2579,128 +3270,208 @@ const PagosVendedorView = ({
     className: "text-sm font-bold text-slate-800 truncate min-w-0"
   }, c.cliente))), clientesFiltrados.length === 0 && React.createElement("p", {
     className: "px-4 py-6 text-center text-sm text-slate-400 font-medium"
-  }, "Ningún cliente coincide.")))), React.createElement("div", {
+  }, "Ningún cliente coincide.")), clientesSel.length > 0 && React.createElement("button", {
+    onClick: () => {
+      setBuscandoCliente(false);
+      setClienteBusqueda('');
+    },
+    className: "mt-2 text-xs font-bold text-slate-500 hover:text-slate-800"
+  }, "Cancelar")) : React.createElement("button", {
+    onClick: () => setBuscandoCliente(true),
+    className: agregarCls + ' border-blue-200 text-blue-700 hover:bg-blue-50 !mt-0'
+  }, React.createElement(Plus, {
+    size: 16
+  }), " Agregar otro cliente a este recibo"))), React.createElement("div", null, React.createElement("p", {
+    className: pasoCls
+  }, React.createElement("span", {
+    className: pasoNumCls
+  }, "2"), " Pagos del recibo"), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mb-3"
+  }, "Si el cliente pagó con más de una transferencia o depósito, agrega cada uno por separado."), React.createElement("div", {
+    className: "space-y-3"
+  }, lineas.map((l, idx) => {
+    const info = buscarTasaVigente(idxTasas, l.fechaPago);
+    const usd = pagoMontoUsd('VES', l.monto, l.tasa);
+    return React.createElement("div", {
+      key: l.uid,
+      className: "border-2 border-slate-100 rounded-2xl p-4 space-y-4"
+    }, React.createElement("div", {
+      className: "flex items-center justify-between gap-3"
+    }, React.createElement("p", {
+      className: "text-xs font-black uppercase tracking-wider text-blue-900"
+    }, lineas.length > 1 ? `Pago ${idx + 1} de ${lineas.length}` : 'Datos del pago'), lineas.length > 1 && React.createElement("button", {
+      onClick: () => quitarLinea(l.uid),
+      className: "text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1"
+    }, React.createElement(Trash2, {
+      size: 14
+    }), " Quitar")), React.createElement("div", {
+      className: "grid grid-cols-1 md:grid-cols-2 gap-4"
+    }, React.createElement("div", null, React.createElement("label", {
+      className: labelCls
+    }, "Banco"), React.createElement("select", {
+      value: l.banco,
+      onChange: e => actualizarLinea(l.uid, {
+        banco: e.target.value
+      }),
+      className: inputCls + ' cursor-pointer'
+    }, React.createElement("option", {
+      value: ""
+    }, "Selecciona el banco..."), BANCOS.map(b => React.createElement("option", {
+      key: b,
+      value: b
+    }, b)))), React.createElement("div", null, React.createElement("label", {
+      className: labelCls
+    }, "Referencia"), React.createElement("input", {
+      type: "text",
+      inputMode: "numeric",
+      placeholder: "Nro. de referencia",
+      value: l.referencia,
+      onChange: e => actualizarLinea(l.uid, {
+        referencia: e.target.value
+      }),
+      className: inputCls
+    })), React.createElement("div", null, React.createElement("label", {
+      className: labelCls
+    }, "Fecha del pago"), React.createElement("input", {
+      type: "date",
+      value: l.fechaPago,
+      onChange: e => actualizarLinea(l.uid, {
+        fechaPago: e.target.value,
+        tasaManual: false
+      }),
+      className: inputCls + ' cursor-pointer'
+    })), React.createElement("div", null, React.createElement("label", {
+      className: labelCls
+    }, "Monto en Bs"), React.createElement("input", {
+      type: "text",
+      inputMode: "decimal",
+      placeholder: "0.00",
+      value: l.monto,
+      onChange: e => actualizarLinea(l.uid, {
+        monto: normalizarEntradaDecimal(e.target.value)
+      }),
+      className: inputCls
+    })), React.createElement("div", null, React.createElement("label", {
+      className: labelCls
+    }, "Tasa del día ", React.createElement("span", {
+      className: "text-slate-400 font-bold normal-case"
+    }, "(opcional)")), React.createElement("input", {
+      type: "text",
+      inputMode: "decimal",
+      placeholder: "Bs por $",
+      value: l.tasa,
+      onChange: e => actualizarLinea(l.uid, {
+        tasa: normalizarEntradaDecimal(e.target.value),
+        tasaManual: true
+      }),
+      className: inputCls
+    }), info ? React.createElement("p", {
+      className: `text-[10px] font-bold mt-1 ${info.exacta ? 'text-blue-600' : 'text-amber-600'}`
+    }, info.exacta ? `Tasa oficial del ${safeFormatDate(l.fechaPago)}` : `Sin tasa exacta del ${safeFormatDate(l.fechaPago)}: se usó la del ${safeFormatDate(info.fechaTasa)}`) : React.createElement("p", {
+      className: "text-[10px] font-bold text-slate-400 mt-1"
+    }, "Sin tasa registrada para esta fecha — ingrésala manualmente."))), Number(l.monto) > 0 && React.createElement("div", {
+      className: `rounded-xl px-4 py-3 text-sm font-bold ${usd !== null ? 'bg-blue-50 text-blue-800 border border-blue-100' : 'bg-slate-50 text-slate-600 border border-slate-200'}`
+    }, usd !== null ? React.createElement(React.Fragment, null, "Bs ", money(l.monto), " equivalen a ", React.createElement("span", {
+      className: "font-black"
+    }, "$", money(usd)), " a la tasa indicada.") : React.createElement(React.Fragment, null, "Se reportará ", React.createElement("span", {
+      className: "font-black"
+    }, "Bs ", money(l.monto)), ". Sin tasa no se calcula el equivalente en dólares, pero el pago se registra igual.")));
+  })), React.createElement("button", {
+    onClick: agregarLinea,
+    className: agregarCls + ' border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50'
+  }, React.createElement(Plus, {
+    size: 16
+  }), " Agregar otro pago a este recibo"), resumenPagos.n > 1 && React.createElement("div", {
+    className: "mt-3 rounded-xl px-4 py-3 text-sm font-bold bg-blue-900 text-white flex flex-wrap items-center justify-between gap-2"
+  }, React.createElement("span", null, "Total de ", resumenPagos.n, " pagos"), React.createElement("span", null, "Bs ", money(resumenPagos.bs), resumenPagos.sinTasa ? React.createElement("span", {
+    className: "text-blue-200"
+  }, " · alguno sin tasa") : React.createElement("span", {
+    className: "text-blue-200"
+  }, " ≈ $", money(resumenPagos.usd))))), React.createElement("div", null, React.createElement("p", {
+    className: pasoCls
+  }, React.createElement("span", {
+    className: pasoNumCls
+  }, "3"), " Retenciones ", React.createElement("span", {
+    className: "text-slate-400 font-bold text-xs"
+  }, "(opcional)")), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mb-3"
+  }, "Si el cliente retuvo impuestos (IVA, ISLR...), regístralos aquí y adjunta el comprobante."), React.createElement("div", {
+    className: "space-y-3"
+  }, retenciones.map((r, idx) => React.createElement("div", {
+    key: r.uid,
+    className: "border-2 border-purple-100 bg-purple-50/40 rounded-2xl p-4 space-y-4"
+  }, React.createElement("div", {
+    className: "flex items-center justify-between gap-3"
+  }, React.createElement("p", {
+    className: "text-xs font-black uppercase tracking-wider text-purple-800"
+  }, "Retención ", idx + 1), React.createElement("button", {
+    onClick: () => quitarRetencion(r.uid),
+    className: "text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1"
+  }, React.createElement(Trash2, {
+    size: 14
+  }), " Quitar")), React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-2 gap-4"
   }, React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Banco"), React.createElement("select", {
-    value: banco,
-    onChange: e => setBanco(e.target.value),
-    className: inputCls + ' cursor-pointer'
-  }, React.createElement("option", {
-    value: ""
-  }, "Selecciona el banco..."), BANCOS.map(b => React.createElement("option", {
-    key: b,
-    value: b
-  }, b)))), React.createElement("div", null, React.createElement("label", {
+  }, "Tipo"), React.createElement("select", {
+    value: r.tipo,
+    onChange: e => actualizarRetencion(r.uid, {
+      tipo: e.target.value
+    }),
+    className: inputCls + ' cursor-pointer bg-white'
+  }, RETENCION_TIPOS.map(t => React.createElement("option", {
+    key: t,
+    value: t
+  }, t)))), React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Referencia"), React.createElement("input", {
-    type: "text",
-    inputMode: "numeric",
-    placeholder: "Nro. de referencia",
-    value: referencia,
-    onChange: e => setReferencia(e.target.value),
-    className: inputCls
-  })), React.createElement("div", null, React.createElement("label", {
-    className: labelCls
-  }, "Fecha del pago"), React.createElement("input", {
-    type: "date",
-    value: fechaPago,
-    onChange: e => setFechaPago(e.target.value),
-    className: inputCls + ' cursor-pointer'
-  })), React.createElement("div", null, React.createElement("label", {
-    className: labelCls
-  }, "Monto en Bs"), React.createElement("input", {
-    type: "text",
-    inputMode: "decimal",
-    placeholder: "0.00",
-    value: montoOriginal,
-    onChange: e => setMontoOriginal(normalizarEntradaDecimal(e.target.value)),
-    className: inputCls
-  })), moneda === 'VES' && React.createElement("div", null, React.createElement("label", {
-    className: labelCls
-  }, "Tasa del día ", React.createElement("span", {
+  }, "Nro. de comprobante ", React.createElement("span", {
     className: "text-slate-400 font-bold normal-case"
   }, "(opcional)")), React.createElement("input", {
     type: "text",
-    inputMode: "decimal",
-    placeholder: "Bs por $",
-    value: tasa,
-    onChange: e => setTasa(normalizarEntradaDecimal(e.target.value)),
-    className: inputCls
-  }), tasaInfo ? React.createElement("p", {
-    className: `text-[10px] font-bold mt-1 ${tasaInfo.exacta ? 'text-blue-600' : 'text-amber-600'}`
-  }, tasaInfo.exacta ? `Tasa oficial del ${safeFormatDate(fechaPago)}` : `Sin tasa exacta del ${safeFormatDate(fechaPago)}: se usó la del ${safeFormatDate(tasaInfo.fechaTasa)}`) : React.createElement("p", {
-    className: "text-[10px] font-bold text-slate-400 mt-1"
-  }, "Sin tasa registrada para esta fecha — ingrésala manualmente."))), moneda === 'VES' && Number(montoOriginal) > 0 && React.createElement("div", {
-    className: `rounded-xl px-4 py-3 text-sm font-bold ${montoUsd !== null ? 'bg-blue-50 text-blue-800 border border-blue-100' : 'bg-slate-50 text-slate-600 border border-slate-200'}`
-  }, montoUsd !== null ? React.createElement(React.Fragment, null, "Bs ", money(montoOriginal), " equivalen a ", React.createElement("span", {
-    className: "font-black"
-  }, "$", money(montoUsd)), " a la tasa indicada.") : React.createElement(React.Fragment, null, "Se reportará ", React.createElement("span", {
-    className: "font-black"
-  }, "Bs ", money(montoOriginal)), ". Sin tasa no se calcula el equivalente en dólares, pero el pago se registra igual.")), React.createElement("div", null, React.createElement("label", {
+    placeholder: "Nro. del comprobante",
+    value: r.numero,
+    onChange: e => actualizarRetencion(r.uid, {
+      numero: e.target.value
+    }),
+    className: inputCls + ' bg-white'
+  })), React.createElement("div", null, React.createElement("label", {
     className: labelCls
-  }, "Facturas o notas que afecta este pago"), !clienteSel ? React.createElement("p", {
-    className: "text-sm text-slate-400 font-medium bg-slate-50 rounded-xl px-4 py-6 text-center"
-  }, "Selecciona primero un cliente.") : React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "border border-slate-100 rounded-xl divide-y divide-slate-50 overflow-hidden"
-  }, facturasCliente.map((f, i) => {
-    const marcada = facturasSel.includes(f.numero);
-    return React.createElement("label", {
-      key: i,
-      className: `flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${marcada ? 'bg-blue-50' : 'hover:bg-slate-50'}`
-    }, React.createElement("input", {
-      type: "checkbox",
-      checked: marcada,
-      onChange: () => toggleFactura(f.numero),
-      className: "w-5 h-5 accent-blue-600 cursor-pointer shrink-0"
-    }), React.createElement("div", {
-      className: "flex-1 min-w-0"
-    }, React.createElement("p", {
-      className: "text-sm font-bold text-slate-800 font-mono truncate"
-    }, f.numero), React.createElement("p", {
-      className: "text-[11px] text-slate-500 font-medium"
-    }, safeFormatDate(f.fecha), " · Saldo $", money(f.saldo))));
-  }), facturasCliente.length === 0 && React.createElement("p", {
-    className: "px-4 py-6 text-center text-sm text-slate-400 font-medium"
-  }, "Este cliente no tiene facturas pendientes cargadas. Agrégala manualmente abajo."), facturasSel.filter(n => !facturasCliente.some(f => f.numero === n)).map(n => React.createElement("div", {
-    key: n,
-    className: "flex items-center gap-3 px-4 py-3 bg-blue-50"
-  }, React.createElement("button", {
-    onClick: () => toggleFactura(n),
-    className: "text-red-500 hover:text-red-700 shrink-0",
-    title: "Quitar"
-  }, React.createElement(X, {
-    size: 16
-  })), React.createElement("div", {
-    className: "flex-1 min-w-0"
-  }, React.createElement("p", {
-    className: "text-sm font-bold text-slate-800 font-mono truncate"
-  }, n), React.createElement("p", {
-    className: "text-[11px] text-slate-500 font-medium"
-  }, "Agregada manualmente"))))), React.createElement("div", {
-    className: "flex gap-2 mt-2"
-  }, React.createElement("input", {
+  }, "Fecha"), React.createElement("input", {
+    type: "date",
+    value: r.fecha,
+    onChange: e => actualizarRetencion(r.uid, {
+      fecha: e.target.value
+    }),
+    className: inputCls + ' cursor-pointer bg-white'
+  })), React.createElement("div", null, React.createElement("label", {
+    className: labelCls
+  }, "Monto retenido en Bs"), React.createElement("input", {
     type: "text",
-    placeholder: "Agregar otra factura o nota por número...",
-    value: facturaManual,
-    onChange: e => setFacturaManual(e.target.value),
-    onKeyDown: e => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        agregarFacturaManual();
-      }
-    },
-    className: inputCls + ' flex-1'
-  }), React.createElement("button", {
-    onClick: agregarFacturaManual,
-    disabled: !facturaManual.trim(),
-    className: "px-4 bg-slate-100 hover:bg-blue-600 hover:text-white disabled:opacity-40 disabled:hover:bg-slate-100 disabled:hover:text-slate-600 text-slate-600 font-bold rounded-xl transition-colors flex items-center gap-1 text-sm"
+    inputMode: "decimal",
+    placeholder: "0.00",
+    value: r.monto,
+    onChange: e => actualizarRetencion(r.uid, {
+      monto: normalizarEntradaDecimal(e.target.value)
+    }),
+    className: inputCls + ' bg-white'
+  }))), React.createElement("div", null, React.createElement("label", {
+    className: labelCls
+  }, "Comprobante de la retención"), listaAdjuntos(adjuntos.filter(a => a.retUid === r.uid)), selectorArchivos('retencion', r.uid, 'Adjuntar comprobante de retención'))))), React.createElement("button", {
+    onClick: agregarRetencion,
+    className: agregarCls + ' border-purple-200 text-purple-700 hover:bg-purple-50'
   }, React.createElement(Plus, {
     size: 16
-  }), " Agregar")), facturasSel.length > 0 && React.createElement("p", {
-    className: "mt-2 text-[11px] font-bold text-slate-500"
-  }, facturasSel.length, " documento", facturasSel.length === 1 ? '' : 's', " marcado", facturasSel.length === 1 ? '' : 's'))), React.createElement("div", null, React.createElement("label", {
+  }), " Agregar una retención")), React.createElement("div", null, React.createElement("p", {
+    className: pasoCls
+  }, React.createElement("span", {
+    className: pasoNumCls
+  }, "4"), " Soportes del pago ", React.createElement("span", {
+    className: "text-slate-400 font-bold text-xs"
+  }, "(opcional)")), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mb-3"
+  }, "Fotos o capturas del comprobante de pago o de la transferencia (JPG, PNG o PDF)."), listaAdjuntos(adjuntos.filter(a => a.tipo === 'pago')), selectorArchivos('pago', null, 'Adjuntar foto o PDF del pago'), React.createElement("p", {
+    className: "text-[10px] text-slate-400 font-medium mt-2"
+  }, "Hasta ", ADJUNTO_MAX_ARCHIVOS, " archivos por reporte, contando los de las retenciones. Las fotos se reducen solas para enviarlas más rápido; los PDF pueden pesar hasta ", aKB(ADJUNTO_MAX_PDF), ".")), React.createElement("div", null, React.createElement("label", {
     className: labelCls
   }, "Observación (opcional)"), React.createElement("textarea", {
     rows: "2",
@@ -2708,7 +3479,27 @@ const PagosVendedorView = ({
     value: observacion,
     onChange: e => setObservacion(e.target.value),
     className: inputCls + ' resize-none'
-  }))), React.createElement("div", {
+  })), (resumenFacturas.n > 0 || resumenPagos.n > 0 || resumenRet.n > 0 || adjuntos.length > 0) && React.createElement("div", {
+    className: "rounded-2xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-1"
+  }, React.createElement("p", {
+    className: "text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1"
+  }, "Resumen del recibo"), React.createElement("p", {
+    className: "font-bold text-slate-700"
+  }, clientesSel.length, " cliente", clientesSel.length === 1 ? '' : 's', " · ", resumenFacturas.n, " factura", resumenFacturas.n === 1 ? '' : 's', resumenFacturas.saldo > 0 && React.createElement("span", {
+    className: "text-slate-400 font-medium"
+  }, " (saldo $", money(resumenFacturas.saldo), ")")), resumenPagos.n > 0 && React.createElement("p", {
+    className: "font-bold text-blue-900"
+  }, resumenPagos.n, " pago", resumenPagos.n === 1 ? '' : 's', ": Bs ", money(resumenPagos.bs), resumenPagos.sinTasa ? React.createElement("span", {
+    className: "text-slate-400 font-medium"
+  }, " · alguno sin tasa") : React.createElement("span", {
+    className: "text-slate-400 font-medium"
+  }, " ≈ $", money(resumenPagos.usd))), resumenRet.n > 0 && React.createElement("p", {
+    className: "font-bold text-purple-800"
+  }, resumenRet.n, " retención", resumenRet.n === 1 ? '' : 'es', ": Bs ", money(resumenRet.bs), resumenRet.sinTasa ? '' : React.createElement("span", {
+    className: "text-slate-400 font-medium"
+  }, " ≈ $", money(resumenRet.usd))), adjuntos.length > 0 && React.createElement("p", {
+    className: "font-bold text-slate-600"
+  }, adjuntos.length, " archivo", adjuntos.length === 1 ? '' : 's', " adjunto", adjuntos.length === 1 ? '' : 's'))), React.createElement("div", {
     className: "p-6 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-3 justify-end"
   }, React.createElement("button", {
     onClick: limpiar,
@@ -2716,7 +3507,7 @@ const PagosVendedorView = ({
     className: "px-6 py-3 bg-white border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-50"
   }, "Limpiar"), React.createElement("button", {
     onClick: enviar,
-    disabled: isSaving,
+    disabled: isSaving || procesandoArchivos,
     className: "px-8 py-3 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
   }, isSaving ? React.createElement(React.Fragment, null, React.createElement("div", {
     className: "w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"
@@ -2779,22 +3570,21 @@ const PagosVendedorView = ({
     className: "text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5"
   }, "Enviando… aún no confirma Administración")), React.createElement("h4", {
     className: "font-black text-slate-800 text-sm truncate"
-  }, p.clienteNombre), React.createElement("p", {
+  }, pagoClienteTexto(p)), React.createElement("p", {
     className: "text-[11px] text-slate-500 font-medium mt-0.5"
   }, p.banco, " · Ref. ", p.referencia, " · ", safeFormatDate(p.fechaPago))), React.createElement("div", {
     className: "text-right shrink-0"
-  }, p.montoUsd === null || p.montoUsd === undefined ? React.createElement("p", {
-    className: "font-black text-blue-900 text-lg"
-  }, "Bs ", money(p.montoOriginal)) : React.createElement("p", {
-    className: "font-black text-blue-900 text-lg"
-  }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
-    className: "text-[10px] font-bold text-slate-400"
-  }, Number(p.tasa) > 0 ? `Bs ${money(p.montoOriginal)} @ ${money(p.tasa)}` : 'Sin tasa cargada'))), React.createElement("div", {
+  }, React.createElement(PagoMontoBloque, {
+    p: p
+  }))), React.createElement("div", {
     className: "mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
   }, (p.facturas || []).map((f, i) => React.createElement("span", {
     key: i,
     className: "text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-mono"
-  }, f.numero))), p.observacion && React.createElement("p", {
+  }, f.numero))), React.createElement(PagoDetalle, {
+    p: p,
+    onVerSoportes: setSoportesDe
+  }), p.observacion && React.createElement("p", {
     className: "mt-2 text-[11px] text-slate-500 font-medium italic"
   }, "\"", p.observacion, "\""), p.estado === 'Procesado' && p.fechaProceso && React.createElement("p", {
     className: "mt-2 text-[11px] font-bold text-green-700"
@@ -2811,7 +3601,12 @@ const PagosVendedorView = ({
     className: "mx-auto mb-3 opacity-40"
   }), React.createElement("p", {
     className: "font-medium"
-  }, "Todavía no has reportado pagos con estos filtros.")))));
+  }, "Todavía no has reportado pagos con estos filtros.")))), soportesDe && React.createElement(PagoSoportesModal, {
+    pago: soportesDe,
+    db: db,
+    getCollectionPath: getCollectionPath,
+    onClose: () => setSoportesDe(null)
+  }));
 };
 const DetallePedidoVendedorModal = ({
   pedido,
@@ -3480,17 +4275,37 @@ const RelacionCobrosPrint = ({
       ...td,
       fontFamily: 'monospace'
     }
-  }, f.codigo), React.createElement("td", {
+  }, f.grupos ? f.grupos.map((g, k) => React.createElement("div", {
+    key: k
+  }, g.codigo)) : f.codigo), React.createElement("td", {
     style: {
       ...td,
       fontWeight: 700
     }
-  }, f.cliente), React.createElement("td", {
+  }, f.grupos ? f.grupos.map((g, k) => React.createElement("div", {
+    key: k
+  }, g.cliente)) : f.cliente), React.createElement("td", {
     style: {
       ...td,
       fontFamily: 'monospace'
     }
-  }, f.facturas.map((n, j) => React.createElement("div", {
+  }, f.grupos ? f.grupos.map((g, k) => React.createElement("div", {
+    key: k,
+    style: k > 0 ? {
+      marginTop: '3px'
+    } : undefined
+  }, React.createElement("div", {
+    style: {
+      fontSize: '7px',
+      color: '#475569',
+      fontWeight: 700
+    }
+  }, g.codigo), g.facturas.length > 0 ? g.facturas.map((n, j) => React.createElement("div", {
+    key: j,
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, n)) : React.createElement("div", null, "-"))) : f.facturas.map((n, j) => React.createElement("div", {
     key: j,
     style: {
       whiteSpace: 'nowrap'
@@ -3508,7 +4323,18 @@ const RelacionCobrosPrint = ({
       textAlign: 'right',
       fontWeight: 900
     }
-  }, f.bs !== null ? React.createElement(React.Fragment, null, React.createElement("div", {
+  }, f.soloRet ? React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, "Retención"), React.createElement("div", {
+    style: {
+      fontWeight: 400,
+      fontSize: '7px',
+      color: '#475569',
+      whiteSpace: 'nowrap'
+    }
+  }, "Bs ", money(f.retBs), " · no suma")) : f.bs !== null ? React.createElement(React.Fragment, null, React.createElement("div", {
     style: {
       whiteSpace: 'nowrap'
     }
@@ -3664,6 +4490,7 @@ const PagosAdminPanel = ({
   const [isSaving, setIsSaving] = useState(false);
   const [rechazando, setRechazando] = useState(null);
   const [motivoRechazo, setMotivoRechazo] = useState('');
+  const [soportesDe, setSoportesDe] = useState(null);
   const vendedoresUnicos = useMemo(() => {
     const map = new Map();
     (pagos || []).forEach(p => {
@@ -3687,7 +4514,7 @@ const PagosAdminPanel = ({
         if (hasta && dia > hasta) return false;
       }
       if (!q) return true;
-      return (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.vendedorNombre || '').toLowerCase().includes(q) || String(p.clienteId || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q));
+      return pagoTextoBuscable(p).includes(q) || (p.clienteNombre || '').toLowerCase().includes(q) || (p.referencia || '').toLowerCase().includes(q) || (p.banco || '').toLowerCase().includes(q) || (p.vendedorNombre || '').toLowerCase().includes(q) || String(p.clienteId || '').toLowerCase().includes(q) || (p.facturas || []).some(f => String(f.numero).toLowerCase().includes(q));
     }).sort((a, b) => safeGetTime(b.fechaReporte) - safeGetTime(a.fechaReporte));
   }, [pagos, busqueda, filtroEstado, filtroVendedor, desde, hasta, filtroFechaTipo]);
   const gruposPantalla = useMemo(() => {
@@ -4080,20 +4907,24 @@ const PagosAdminPanel = ({
         className: "font-black text-slate-800 text-sm truncate"
       }, React.createElement("span", {
         className: "font-mono text-slate-400 mr-1"
-      }, p.clienteId), p.clienteNombre), React.createElement("p", {
+      }, p.clienteId), p.clienteNombre, pagoClientes(p).length > 1 && React.createElement("span", {
+        className: "ml-1.5 text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-2 py-0.5 align-middle"
+      }, "+", pagoClientes(p).length - 1, " cliente", pagoClientes(p).length - 1 === 1 ? '' : 's')), React.createElement("p", {
         className: "text-[11px] text-slate-500 font-medium mt-0.5"
       }, p.banco, " · Ref. ", p.referencia, " · Pagado ", safeFormatDate(p.fechaPago))), React.createElement("div", {
         className: "text-right shrink-0"
-      }, React.createElement("p", {
-        className: "font-black text-blue-900 text-lg"
-      }, "$", money(p.montoUsd)), p.moneda === 'VES' && React.createElement("p", {
-        className: "text-[10px] font-bold text-slate-400"
-      }, "Bs ", money(p.montoOriginal), " @ ", money(p.tasa)))), React.createElement("div", {
+      }, React.createElement(PagoMontoBloque, {
+        p: p,
+        admin: true
+      }))), React.createElement("div", {
         className: "mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
       }, (p.facturas || []).map((f, i) => React.createElement("span", {
         key: i,
         className: "text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-mono"
-      }, f.numero))), p.observacion && React.createElement("p", {
+      }, f.numero))), React.createElement(PagoDetalle, {
+        p: p,
+        onVerSoportes: setSoportesDe
+      }), p.observacion && React.createElement("p", {
         className: "mt-2 text-[11px] text-slate-500 font-medium italic"
       }, "\"", p.observacion, "\""), estado === 'Rechazado' && React.createElement("p", {
         className: "mt-2 text-[11px] font-bold text-red-700"
@@ -4131,7 +4962,12 @@ const PagosAdminPanel = ({
     className: "mx-auto mb-3 opacity-40"
   }), React.createElement("p", {
     className: "font-medium"
-  }, "No hay pagos con estos filtros."))), rechazando && React.createElement("div", {
+  }, "No hay pagos con estos filtros."))), soportesDe && React.createElement(PagoSoportesModal, {
+    pago: soportesDe,
+    db: db,
+    getCollectionPath: getCollectionPath,
+    onClose: () => setSoportesDe(null)
+  }), rechazando && React.createElement("div", {
     className: "fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
   }, React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
@@ -4139,7 +4975,7 @@ const PagosAdminPanel = ({
     className: "font-black text-lg text-slate-800 mb-1"
   }, "Rechazar pago"), React.createElement("p", {
     className: "text-sm text-slate-500 font-medium mb-4"
-  }, rechazando.clienteNombre, " · ", rechazando.montoUsd === null || rechazando.montoUsd === undefined ? `Bs ${money(rechazando.montoOriginal)}` : `$${money(rechazando.montoUsd)}`, " · Ref. ", rechazando.referencia), React.createElement("label", {
+  }, pagoClienteTexto(rechazando), " · ", rechazando.montoUsd === null || rechazando.montoUsd === undefined ? `Bs ${money(rechazando.montoOriginal)}` : `$${money(rechazando.montoUsd)}`, " · Ref. ", rechazando.referencia), React.createElement("label", {
     className: "text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5 block"
   }, "Motivo (lo verá el vendedor)"), React.createElement("textarea", {
     rows: "3",
@@ -9412,12 +10248,737 @@ const HistoricoDashboard = ({
     className: "p-4 text-center text-xs font-bold text-slate-400 bg-slate-50 border-t border-slate-100"
   }, "Mostrando los primeros 150 registros. Utiliza el buscador para encontrar resultados específicos."))));
 };
+const INCENTIVO_TIPOS = [{
+  id: 'empresa',
+  label: 'Empresa'
+}, {
+  id: 'marca',
+  label: 'Marca / línea'
+}, {
+  id: 'subgrupo',
+  label: 'Subgrupo'
+}, {
+  id: 'producto',
+  label: 'Producto'
+}];
+const incentivoTipoLabel = t => (INCENTIVO_TIPOS.find(x => x.id === t) || {
+  label: String(t || '')
+}).label;
+const aNumeroIncentivo = v => {
+  const n = Number(String(v === undefined || v === null ? '' : v).replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+const fmtCajas = n => Number(n || 0).toLocaleString(undefined, {
+  maximumFractionDigits: 2
+});
+const normalizarIncentivos = lista => (Array.isArray(lista) ? lista : []).filter(i => i && i.tipo && String(i.valor || '').trim()).map((i, n) => ({
+  id: String(i.id || `inc${n}`),
+  tipo: String(i.tipo),
+  valor: String(i.valor).trim(),
+  objetivo: aNumeroIncentivo(i.objetivo) > 0 ? aNumeroIncentivo(i.objetivo) : 0,
+  porVendedor: i.porVendedor && typeof i.porVendedor === 'object' ? i.porVendedor : {}
+}));
+const limpiarIncentivos = lista => (lista || []).filter(i => i && String(i.valor || '').trim()).map(i => {
+  const pv = {};
+  Object.entries(i.porVendedor || {}).forEach(([k, v]) => {
+    if (String(v === undefined || v === null ? '' : v).trim() === '') return;
+    const n = aNumeroIncentivo(v);
+    if (n >= 0) pv[k] = n;
+  });
+  return {
+    id: i.id,
+    tipo: i.tipo,
+    valor: String(i.valor).trim(),
+    objetivo: aNumeroIncentivo(i.objetivo) > 0 ? aNumeroIncentivo(i.objetivo) : 0,
+    porVendedor: pv
+  };
+});
+const firmaIncentivos = lista => JSON.stringify(limpiarIncentivos(lista).map(i => ({
+  ...i,
+  porVendedor: Object.fromEntries(Object.entries(i.porVendedor).sort((a, b) => a[0].localeCompare(b[0])))
+})).sort((a, b) => a.id.localeCompare(b.id)));
+const mesEnCursoDeVentas = sales => {
+  const cm = (sales || []).filter(s => s.source === 'currMonth');
+  return getLatestMonthStr(cm.length > 0 ? cm : sales || []);
+};
+const esFilaDelMes = (s, mesStr) => s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(mesStr);
+const esFilaDeVendedor = (s, userId, normUserId) => {
+  const matchId = normalizeId(s.idVendedor) === normUserId;
+  const matchName = typeof s.vendedor === 'string' && (s.vendedor.startsWith(userId + ' ') || s.vendedor.startsWith(userId + '-') || s.vendedor === userId);
+  return matchId || matchName;
+};
+const valorFilaIncentivo = (tipo, r) => tipo === 'empresa' ? r.grupo : tipo === 'marca' ? r.linea : tipo === 'subgrupo' ? r.subgrupo : r.articulo;
+const incentivoCoincide = (item, r) => {
+  const v = normalizeName(item.valor);
+  return !!v && normalizeName(valorFilaIncentivo(item.tipo, r)) === v;
+};
+const objetivoIncentivo = (item, vendedorId) => {
+  const nid = normalizeId(vendedorId);
+  const pv = item.porVendedor || {};
+  const k = Object.keys(pv).find(x => normalizeId(x) === nid);
+  if (k !== undefined) {
+    const v = pv[k];
+    if (v !== '' && v !== null && v !== undefined && aNumeroIncentivo(v) >= 0) return aNumeroIncentivo(v);
+  }
+  return item.objetivo || 0;
+};
+const calcularIncentivos = (items, filas, vendedorId) => items.map(item => {
+  const objetivo = objetivoIncentivo(item, vendedorId);
+  let cajas = 0;
+  for (let i = 0; i < filas.length; i++) if (incentivoCoincide(item, filas[i])) cajas += Number(filas[i].cajas) || 0;
+  cajas = Math.round(cajas * 100) / 100;
+  return {
+    ...item,
+    objetivo,
+    cajas,
+    falta: Math.max(objetivo - cajas, 0),
+    pct: objetivo > 0 ? cajas / objetivo * 100 : 0
+  };
+}).filter(r => r.objetivo > 0);
+const colorIncentivo = pct => pct >= 100 ? {
+  barra: 'bg-green-500',
+  texto: 'text-green-600'
+} : pct >= 50 ? {
+  barra: 'bg-blue-500',
+  texto: 'text-blue-600'
+} : {
+  barra: 'bg-orange-500',
+  texto: 'text-orange-600'
+};
+const IncentivoTabla = ({
+  titulo,
+  filas,
+  mostrarTipo
+}) => {
+  if (filas.length === 0) return null;
+  return React.createElement("div", null, React.createElement("h4", {
+    className: "text-sm font-black text-slate-700 uppercase tracking-wider mb-2"
+  }, titulo), React.createElement("div", {
+    className: "overflow-x-auto border border-slate-100 rounded-xl"
+  }, React.createElement("table", {
+    className: "w-full text-sm min-w-[620px] table-fixed"
+  }, React.createElement("colgroup", null, React.createElement("col", {
+    style: {
+      width: '32%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '14%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '13%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '12%'
+    }
+  }), React.createElement("col", {
+    style: {
+      width: '29%'
+    }
+  })), React.createElement("thead", {
+    className: "bg-slate-50 text-[10px] uppercase font-black text-slate-500 tracking-wider"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "text-left px-4 py-3"
+  }, mostrarTipo ? 'Marca / producto' : 'Empresa'), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Objetivo (cajas)"), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Vendidas"), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Te faltan"), React.createElement("th", {
+    className: "text-left px-4 py-3"
+  }, "% de cumplimiento"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, filas.map(r => {
+    const c = colorIncentivo(r.pct);
+    return React.createElement("tr", {
+      key: r.id
+    }, React.createElement("td", {
+      className: "px-4 py-3"
+    }, React.createElement("p", {
+      className: "font-black text-slate-800 leading-tight"
+    }, r.valor), mostrarTipo && React.createElement("span", {
+      className: "text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+    }, incentivoTipoLabel(r.tipo))), React.createElement("td", {
+      className: "px-3 py-3 text-right font-bold text-slate-600"
+    }, fmtCajas(r.objetivo)), React.createElement("td", {
+      className: "px-3 py-3 text-right font-black text-blue-900"
+    }, fmtCajas(r.cajas)), React.createElement("td", {
+      className: `px-3 py-3 text-right font-black ${r.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+    }, fmtCajas(r.falta)), React.createElement("td", {
+      className: "px-4 py-3"
+    }, React.createElement("div", {
+      className: "flex items-center gap-3"
+    }, React.createElement("div", {
+      className: "flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden"
+    }, React.createElement("div", {
+      className: `h-full rounded-full transition-all duration-700 ${c.barra}`,
+      style: {
+        width: `${Math.min(r.pct, 100)}%`
+      }
+    })), React.createElement("span", {
+      className: `font-black text-sm w-16 text-right ${c.texto}`
+    }, r.pct.toFixed(1), "%")), r.pct >= 100 && React.createElement("span", {
+      className: "inline-block mt-1 text-[10px] font-black text-green-700 bg-green-100 px-2 py-0.5 rounded-full"
+    }, "¡Cumplido!")));
+  })))));
+};
+const IncentivosCard = ({
+  sales,
+  userId,
+  incentivos
+}) => {
+  const items = useMemo(() => normalizarIncentivos(incentivos), [incentivos]);
+  const {
+    filas,
+    mesStr
+  } = useMemo(() => {
+    if (items.length === 0) return {
+      filas: [],
+      mesStr: ''
+    };
+    const mes = mesEnCursoDeVentas(sales);
+    const nid = normalizeId(userId);
+    return {
+      mesStr: mes,
+      filas: (sales || []).filter(s => esFilaDeVendedor(s, userId, nid) && esFilaDelMes(s, mes))
+    };
+  }, [sales, userId, items]);
+  const resultados = useMemo(() => calcularIncentivos(items, filas, userId), [items, filas, userId]);
+  if (resultados.length === 0) return null;
+  const empresas = resultados.filter(r => r.tipo === 'empresa');
+  const otros = resultados.filter(r => r.tipo !== 'empresa');
+  return React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
+  }, React.createElement("div", {
+    className: "bg-gradient-to-r from-blue-900 to-blue-800 text-white p-5 md:p-6 flex flex-wrap justify-between items-center gap-3"
+  }, React.createElement("div", null, React.createElement("h3", {
+    className: "font-black text-xl flex items-center gap-3"
+  }, React.createElement(Award, {
+    size: 24,
+    className: "text-orange-400"
+  }), " Incentivos"), React.createElement("p", {
+    className: "text-sm text-blue-200 mt-1 font-medium"
+  }, "Cajas que llevas vendidas este mes frente al objetivo de cada incentivo.")), React.createElement("span", {
+    className: "bg-white/20 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-sm backdrop-blur border border-white/30"
+  }, "Mes en Curso: ", formatMonthStr(mesStr))), React.createElement("div", {
+    className: "p-5 md:p-6 space-y-6"
+  }, React.createElement(IncentivoTabla, {
+    titulo: "Empresas",
+    filas: empresas
+  }), React.createElement(IncentivoTabla, {
+    titulo: "Otras marcas / productos",
+    filas: otros,
+    mostrarTipo: true
+  }), React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-400"
+  }, React.createElement("span", {
+    className: "font-black text-green-600"
+  }, "Verde"), ": cumplido · ", React.createElement("span", {
+    className: "font-black text-blue-600"
+  }, "Azul"), ": ya llevas la mitad o más · ", React.createElement("span", {
+    className: "font-black text-orange-600"
+  }, "Naranja"), ": menos de la mitad.")));
+};
+const IncentivoFilaAdmin = ({
+  item,
+  vendedores,
+  abierto,
+  mostrarTipo,
+  onToggle,
+  onChange,
+  onChangeVendedor,
+  onRemove
+}) => {
+  const valorInput = v => v === '' || v === 0 || v === null || v === undefined ? '' : String(v);
+  const propios = Object.values(item.porVendedor || {}).filter(v => String(v === undefined || v === null ? '' : v).trim() !== '').length;
+  return React.createElement("div", {
+    className: "border border-slate-100 rounded-xl overflow-hidden bg-white"
+  }, React.createElement("div", {
+    className: "flex flex-wrap items-center gap-3 px-4 py-3"
+  }, React.createElement("div", {
+    className: "flex-1 min-w-[160px]"
+  }, React.createElement("p", {
+    className: "font-black text-slate-800 text-sm leading-tight"
+  }, item.valor), mostrarTipo && React.createElement("span", {
+    className: "text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+  }, incentivoTipoLabel(item.tipo))), React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("span", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
+  }, "Objetivo (cajas)"), React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    placeholder: "0",
+    value: valorInput(item.objetivo),
+    onChange: e => onChange(item.id, {
+      objetivo: normalizarEntradaDecimal(e.target.value)
+    }),
+    className: "w-24 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-right outline-none focus:border-blue-500"
+  })), React.createElement("button", {
+    onClick: () => onToggle(item.id),
+    className: `text-xs font-bold px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 ${abierto ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700'}`
+  }, React.createElement(Users, {
+    size: 14
+  }), " Por vendedor", propios > 0 && React.createElement("span", {
+    className: "bg-orange-500 text-white text-[10px] font-black px-1.5 rounded-full"
+  }, propios)), React.createElement("button", {
+    onClick: () => onRemove(item.id),
+    className: "p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors",
+    title: "Quitar de la lista"
+  }, React.createElement(Trash2, {
+    size: 16
+  }))), abierto && React.createElement("div", {
+    className: "bg-slate-50 border-t border-slate-100 px-4 py-3"
+  }, React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-500 mb-2"
+  }, "Objetivo propio de cada vendedor. En blanco se usa el objetivo general", item.objetivo > 0 ? ` (${fmtCajas(item.objetivo)})` : '', ". Pon 0 para que no aplique a ese vendedor."), React.createElement("div", {
+    className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto"
+  }, vendedores.map(v => React.createElement("label", {
+    key: v.id,
+    className: "flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-3 py-2"
+  }, React.createElement("span", {
+    className: "flex-1 min-w-0 truncate text-xs font-bold text-slate-700",
+    title: v.nombre
+  }, React.createElement("span", {
+    className: "font-mono text-slate-400 mr-1"
+  }, v.id), v.nombre), React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    placeholder: item.objetivo > 0 ? fmtCajas(item.objetivo) : '—',
+    value: (item.porVendedor || {})[v.id] === undefined ? '' : String((item.porVendedor || {})[v.id]),
+    onChange: e => onChangeVendedor(item.id, v.id, normalizarEntradaDecimal(e.target.value)),
+    className: "w-20 border-2 border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-right outline-none focus:border-blue-500"
+  }))), vendedores.length === 0 && React.createElement("p", {
+    className: "text-xs text-slate-400 font-medium col-span-full"
+  }, "No hay vendedores cargados."))));
+};
+const IncentivosAdminPanel = ({
+  sales,
+  users,
+  catalog,
+  appConfig,
+  openModal,
+  db,
+  getCollectionPath
+}) => {
+  const guardadoStr = useMemo(() => firmaIncentivos(normalizarIncentivos(appConfig && appConfig.incentivos)), [appConfig]);
+  const [items, setItems] = useState(() => normalizarIncentivos(appConfig && appConfig.incentivos));
+  const guardadoRef = useRef(guardadoStr);
+  const [vista, setVista] = useState('config');
+  const [isSaving, setIsSaving] = useState(false);
+  const [abierto, setAbierto] = useState(null);
+  const [empresaNueva, setEmpresaNueva] = useState('');
+  const [tipoNuevo, setTipoNuevo] = useState('marca');
+  const [valorNuevo, setValorNuevo] = useState('');
+  const [objetivoNuevo, setObjetivoNuevo] = useState('');
+  const [avanceId, setAvanceId] = useState('');
+  useEffect(() => {
+    if (guardadoRef.current === guardadoStr) return;
+    setItems(prev => firmaIncentivos(prev) === guardadoRef.current ? normalizarIncentivos(appConfig && appConfig.incentivos) : prev);
+    guardadoRef.current = guardadoStr;
+  }, [guardadoStr]);
+  const hayCambios = firmaIncentivos(items) !== guardadoStr;
+  const vendedores = useMemo(() => (users || []).filter(u => u.rol === 'vendedor').slice().sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')), [users]);
+  const conocidos = useMemo(() => {
+    const mk = () => new Map();
+    const emp = mk(),
+      marca = mk(),
+      sub = mk(),
+      prod = mk();
+    const add = (m, v) => {
+      const t = String(v || '').trim();
+      if (t) {
+        const k = normalizeName(t);
+        if (!m.has(k)) m.set(k, t);
+      }
+    };
+    (sales || []).forEach(s => {
+      add(emp, s.grupo);
+      add(marca, s.linea);
+      add(sub, s.subgrupo);
+      add(prod, s.articulo);
+    });
+    (catalog || []).forEach(p => {
+      if (p) {
+        add(emp, p.grupo);
+        add(sub, p.subgrupo);
+      }
+    });
+    const ord = m => Array.from(m.values()).sort((a, b) => a.localeCompare(b));
+    return {
+      empresa: ord(emp),
+      marca: ord(marca),
+      subgrupo: ord(sub),
+      producto: ord(prod)
+    };
+  }, [sales, catalog]);
+  const nuevoId = () => 'inc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const existe = (tipo, valor, lista = items) => lista.some(i => i.tipo === tipo && normalizeName(i.valor) === normalizeName(valor));
+  const actualizar = (id, patch) => setItems(prev => prev.map(i => i.id === id ? {
+    ...i,
+    ...patch
+  } : i));
+  const quitar = id => {
+    setItems(prev => prev.filter(i => i.id !== id));
+    if (abierto === id) setAbierto(null);
+  };
+  const cambiarVendedor = (id, vid, texto) => setItems(prev => prev.map(i => i.id !== id ? i : {
+    ...i,
+    porVendedor: {
+      ...(i.porVendedor || {}),
+      [vid]: texto
+    }
+  }));
+  const agregarEmpresa = valor => {
+    if (!valor || existe('empresa', valor)) return;
+    setItems(prev => [...prev, {
+      id: nuevoId(),
+      tipo: 'empresa',
+      valor,
+      objetivo: '',
+      porVendedor: {}
+    }]);
+  };
+  const empresasQueFaltan = conocidos.empresa.filter(e => !existe('empresa', e));
+  const cargarTodasEmpresas = () => {
+    setItems(prev => {
+      const nuevas = conocidos.empresa.filter(e => !prev.some(i => i.tipo === 'empresa' && normalizeName(i.valor) === normalizeName(e))).map(e => ({
+        id: nuevoId(),
+        tipo: 'empresa',
+        valor: e,
+        objetivo: '',
+        porVendedor: {}
+      }));
+      return [...prev, ...nuevas];
+    });
+  };
+  const agregarOtro = () => {
+    const valor = valorNuevo.trim();
+    if (!valor) {
+      openModal('alert', null, 'Falta el nombre', 'Escribe o elige la marca, subgrupo o producto.', true);
+      return;
+    }
+    if (existe(tipoNuevo, valor)) {
+      openModal('alert', null, 'Ya está en la lista', `"${valor}" ya existe como ${incentivoTipoLabel(tipoNuevo).toLowerCase()}.`, true);
+      return;
+    }
+    setItems(prev => [...prev, {
+      id: nuevoId(),
+      tipo: tipoNuevo,
+      valor,
+      objetivo: objetivoNuevo,
+      porVendedor: {}
+    }]);
+    setValorNuevo('');
+    setObjetivoNuevo('');
+  };
+  const guardar = async () => {
+    const limpio = limpiarIncentivos(items);
+    const claves = new Set();
+    for (const i of limpio) {
+      const k = i.tipo + '|' + normalizeName(i.valor);
+      if (claves.has(k)) {
+        openModal('alert', null, 'Incentivo repetido', `"${i.valor}" está dos veces en la lista.`, true);
+        return;
+      }
+      claves.add(k);
+    }
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, getCollectionPath('config'), 'settings'), {
+        incentivos: limpio
+      }, {
+        merge: true
+      });
+      openModal('alert', null, 'Incentivos guardados', 'Los vendedores ya ven sus objetivos en Indicadores, en la tarjeta Incentivos.', true);
+    } catch (err) {
+      console.error('Error al guardar incentivos', err);
+      openModal('alert', null, 'Error', 'No se pudieron guardar los incentivos. Verifica tu conexión e intenta de nuevo.', true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  const ordenar = lista => lista.slice().sort((a, b) => a.valor.localeCompare(b.valor));
+  const empresas = ordenar(items.filter(i => i.tipo === 'empresa'));
+  const otros = ordenar(items.filter(i => i.tipo !== 'empresa'));
+  const guardadas = useMemo(() => normalizarIncentivos(appConfig && appConfig.incentivos).filter(i => i.objetivo > 0 || Object.keys(i.porVendedor).length > 0).sort((a, b) => a.valor.localeCompare(b.valor)), [appConfig]);
+  const mesStr = useMemo(() => vista === 'avance' ? mesEnCursoDeVentas(sales) : '', [sales, vista]);
+  const porVendedorFilas = useMemo(() => {
+    if (vista !== 'avance') return new Map();
+    const m = new Map();
+    (sales || []).forEach(s => {
+      if (!esFilaDelMes(s, mesStr)) return;
+      const k = normalizeId(s.idVendedor);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(s);
+    });
+    return m;
+  }, [sales, mesStr, vista]);
+  const itemAvance = guardadas.find(i => i.id === avanceId) || guardadas[0] || null;
+  const filasAvance = useMemo(() => {
+    if (vista !== 'avance' || !itemAvance) return [];
+    return vendedores.map(u => {
+      const rows = porVendedorFilas.get(normalizeId(u.id)) || [];
+      const objetivo = objetivoIncentivo(itemAvance, u.id);
+      let cajas = 0;
+      for (let i = 0; i < rows.length; i++) if (incentivoCoincide(itemAvance, rows[i])) cajas += Number(rows[i].cajas) || 0;
+      cajas = Math.round(cajas * 100) / 100;
+      return {
+        u,
+        objetivo,
+        cajas,
+        falta: Math.max(objetivo - cajas, 0),
+        pct: objetivo > 0 ? cajas / objetivo * 100 : null
+      };
+    }).sort((a, b) => (b.pct === null ? -1 : b.pct) - (a.pct === null ? -1 : a.pct));
+  }, [vista, itemAvance, vendedores, porVendedorFilas]);
+  const inputSel = "border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-white";
+  const lblCls = "text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1";
+  return React.createElement("div", {
+    className: "space-y-6 animate-fadeIn p-4 md:p-8"
+  }, React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap justify-between items-center gap-4"
+  }, React.createElement("div", {
+    className: "min-w-0"
+  }, React.createElement("h3", {
+    className: "font-black text-lg text-blue-900 flex items-center gap-3"
+  }, React.createElement(Award, {
+    className: "text-orange-500"
+  }), " Incentivos"), React.createElement("p", {
+    className: "text-slate-500 text-sm font-medium mt-1"
+  }, "Define cuántas cajas debe vender cada vendedor este mes. Ellos lo ven en Indicadores, en la tarjeta Incentivos.")), React.createElement("div", {
+    className: "flex bg-slate-100 p-1 rounded-xl shrink-0"
+  }, React.createElement("button", {
+    onClick: () => setVista('config'),
+    className: `px-4 py-2 rounded-lg text-sm font-bold transition-all ${vista === 'config' ? 'bg-white shadow text-blue-900' : 'text-slate-500 hover:text-slate-700'}`
+  }, "Configurar"), React.createElement("button", {
+    onClick: () => setVista('avance'),
+    className: `px-4 py-2 rounded-lg text-sm font-bold transition-all ${vista === 'avance' ? 'bg-white shadow text-blue-900' : 'text-slate-500 hover:text-slate-700'}`
+  }, "Avance del mes"))), vista === 'config' && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "bg-blue-50 border border-blue-100 rounded-2xl px-5 py-4 text-sm text-blue-900 font-medium"
+  }, React.createElement("span", {
+    className: "font-black"
+  }, "Cómo se usa:"), " 1) Agrega las empresas. 2) Escribe el objetivo en cajas de cada una. 3) Guarda. Si un vendedor debe tener otro objetivo, usa ", React.createElement("span", {
+    className: "font-black"
+  }, "Por vendedor"), "."), React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, React.createElement("div", {
+    className: "flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-slate-100"
+  }, React.createElement("div", null, React.createElement("h4", {
+    className: "font-black text-blue-900 text-base"
+  }, "Empresas"), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mt-0.5"
+  }, "Un objetivo en cajas por empresa. Las empresas sin objetivo no se muestran a los vendedores.")), React.createElement("button", {
+    onClick: cargarTodasEmpresas,
+    disabled: empresasQueFaltan.length === 0,
+    className: "text-sm font-bold bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white disabled:opacity-40 disabled:hover:bg-blue-50 disabled:hover:text-blue-700 px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+  }, React.createElement(PlusCircle, {
+    size: 16
+  }), " Cargar todas las empresas", empresasQueFaltan.length > 0 ? ` (${empresasQueFaltan.length})` : '')), React.createElement("div", {
+    className: "space-y-2"
+  }, empresas.map(i => React.createElement(IncentivoFilaAdmin, {
+    key: i.id,
+    item: i,
+    vendedores: vendedores,
+    abierto: abierto === i.id,
+    onToggle: id => setAbierto(abierto === id ? null : id),
+    onChange: actualizar,
+    onChangeVendedor: cambiarVendedor,
+    onRemove: quitar
+  })), empresas.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-6"
+  }, "Todavía no hay empresas. Usa \"Cargar todas las empresas\" o agrega una aquí abajo.")), React.createElement("div", {
+    className: "flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-100"
+  }, React.createElement("select", {
+    value: empresaNueva,
+    onChange: e => setEmpresaNueva(e.target.value),
+    className: inputSel + ' flex-1 min-w-[220px]'
+  }, React.createElement("option", {
+    value: ""
+  }, "Agregar una empresa…"), empresasQueFaltan.map(e => React.createElement("option", {
+    key: e,
+    value: e
+  }, e))), React.createElement("button", {
+    onClick: () => {
+      agregarEmpresa(empresaNueva);
+      setEmpresaNueva('');
+    },
+    disabled: !empresaNueva,
+    className: "px-5 bg-blue-900 hover:bg-blue-800 disabled:opacity-40 text-white font-bold rounded-xl transition-colors flex items-center gap-2 text-sm"
+  }, React.createElement(Plus, {
+    size: 16
+  }), " Agregar"))), React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, React.createElement("div", {
+    className: "mb-4 pb-4 border-b border-slate-100"
+  }, React.createElement("h4", {
+    className: "font-black text-blue-900 text-base"
+  }, "Otras marcas / productos"), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mt-0.5"
+  }, "Otros incentivos aparte de las empresas: una marca o línea, un subgrupo o un producto en particular.")), React.createElement("div", {
+    className: "space-y-2"
+  }, otros.map(i => React.createElement(IncentivoFilaAdmin, {
+    key: i.id,
+    item: i,
+    vendedores: vendedores,
+    abierto: abierto === i.id,
+    mostrarTipo: true,
+    onToggle: id => setAbierto(abierto === id ? null : id),
+    onChange: actualizar,
+    onChangeVendedor: cambiarVendedor,
+    onRemove: quitar
+  })), otros.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-6"
+  }, "Todavía no hay otros incentivos. Agrégalos aquí abajo.")), React.createElement("div", {
+    className: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-100"
+  }, React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Tipo"), React.createElement("select", {
+    value: tipoNuevo,
+    onChange: e => {
+      setTipoNuevo(e.target.value);
+      setValorNuevo('');
+    },
+    className: inputSel
+  }, INCENTIVO_TIPOS.filter(t => t.id !== 'empresa').map(t => React.createElement("option", {
+    key: t.id,
+    value: t.id
+  }, t.label)))), React.createElement("div", {
+    className: "flex-1 min-w-[220px]"
+  }, React.createElement("label", {
+    className: lblCls
+  }, "Nombre (escribe o elige)"), React.createElement("input", {
+    type: "text",
+    list: "dl-incentivo-valores",
+    placeholder: "Ej: nombre de la marca o del producto",
+    value: valorNuevo,
+    onChange: e => setValorNuevo(e.target.value),
+    className: inputSel + ' w-full'
+  }), React.createElement("datalist", {
+    id: "dl-incentivo-valores"
+  }, (conocidos[tipoNuevo] || []).map(v => React.createElement("option", {
+    key: v,
+    value: v
+  })))), React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Objetivo (cajas)"), React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    placeholder: "0",
+    value: objetivoNuevo,
+    onChange: e => setObjetivoNuevo(normalizarEntradaDecimal(e.target.value)),
+    className: inputSel + ' w-28 text-right'
+  })), React.createElement("button", {
+    onClick: agregarOtro,
+    className: "px-5 py-2.5 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors flex items-center gap-2 text-sm"
+  }, React.createElement(Plus, {
+    size: 16
+  }), " Agregar"))), React.createElement("div", {
+    className: "sticky bottom-4 z-10"
+  }, React.createElement("div", {
+    className: "bg-slate-900 text-white rounded-2xl shadow-xl px-5 py-3 flex flex-wrap items-center justify-between gap-3"
+  }, React.createElement("span", {
+    className: "text-sm font-bold flex items-center gap-2"
+  }, hayCambios ? React.createElement(React.Fragment, null, React.createElement(AlertCircle, {
+    size: 16,
+    className: "text-orange-400"
+  }), " Tienes cambios sin guardar.") : React.createElement(React.Fragment, null, React.createElement(CheckCircle2, {
+    size: 16,
+    className: "text-green-400"
+  }), " Todo guardado.")), React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement("button", {
+    onClick: () => setItems(normalizarIncentivos(appConfig && appConfig.incentivos)),
+    disabled: !hayCambios || isSaving,
+    className: "px-4 py-2 bg-white/10 hover:bg-white/20 disabled:opacity-40 rounded-xl text-sm font-bold transition-colors"
+  }, "Descartar"), React.createElement("button", {
+    onClick: guardar,
+    disabled: !hayCambios || isSaving,
+    className: "px-5 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 rounded-xl text-sm font-black transition-colors flex items-center gap-2"
+  }, isSaving ? React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"
+  }), " Guardando...") : React.createElement(React.Fragment, null, React.createElement(Save, {
+    size: 16
+  }), " Guardar incentivos")))))), vista === 'avance' && React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, guardadas.length === 0 ? React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-10"
+  }, "Todavía no hay incentivos guardados con objetivo. Configúralos y guarda para ver el avance.") : React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "flex flex-wrap items-end justify-between gap-3 mb-4 pb-4 border-b border-slate-100"
+  }, React.createElement("div", {
+    className: "min-w-[240px]"
+  }, React.createElement("label", {
+    className: lblCls
+  }, "Incentivo"), React.createElement("select", {
+    value: itemAvance ? itemAvance.id : '',
+    onChange: e => setAvanceId(e.target.value),
+    className: inputSel + ' w-full'
+  }, guardadas.map(i => React.createElement("option", {
+    key: i.id,
+    value: i.id
+  }, i.valor, " · ", incentivoTipoLabel(i.tipo))))), React.createElement("span", {
+    className: "bg-slate-100 text-slate-600 px-4 py-1.5 rounded-full text-xs font-bold"
+  }, "Mes en Curso: ", formatMonthStr(mesStr))), React.createElement("div", {
+    className: "overflow-x-auto border border-slate-100 rounded-xl"
+  }, React.createElement("table", {
+    className: "w-full text-sm min-w-[620px]"
+  }, React.createElement("thead", {
+    className: "bg-slate-50 text-[10px] uppercase font-black text-slate-500 tracking-wider"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "text-left px-4 py-3"
+  }, "Vendedor"), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Objetivo (cajas)"), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Vendidas"), React.createElement("th", {
+    className: "text-right px-3 py-3"
+  }, "Faltan"), React.createElement("th", {
+    className: "text-left px-4 py-3 w-[30%]"
+  }, "% de cumplimiento"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, filasAvance.map(f => {
+    const c = colorIncentivo(f.pct || 0);
+    return React.createElement("tr", {
+      key: f.u.id,
+      className: f.pct === null ? 'opacity-50' : ''
+    }, React.createElement("td", {
+      className: "px-4 py-3 font-bold text-slate-800"
+    }, React.createElement("span", {
+      className: "font-mono text-slate-400 mr-1"
+    }, f.u.id), f.u.nombre), React.createElement("td", {
+      className: "px-3 py-3 text-right font-bold text-slate-600"
+    }, f.pct === null ? '—' : fmtCajas(f.objetivo)), React.createElement("td", {
+      className: "px-3 py-3 text-right font-black text-blue-900"
+    }, fmtCajas(f.cajas)), React.createElement("td", {
+      className: `px-3 py-3 text-right font-black ${f.pct === null ? 'text-slate-300' : f.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+    }, f.pct === null ? '—' : fmtCajas(f.falta)), React.createElement("td", {
+      className: "px-4 py-3"
+    }, f.pct === null ? React.createElement("span", {
+      className: "text-xs font-bold text-slate-400"
+    }, "Sin objetivo") : React.createElement("div", {
+      className: "flex items-center gap-3"
+    }, React.createElement("div", {
+      className: "flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden"
+    }, React.createElement("div", {
+      className: `h-full rounded-full ${c.barra}`,
+      style: {
+        width: `${Math.min(f.pct, 100)}%`
+      }
+    })), React.createElement("span", {
+      className: `font-black text-sm w-16 text-right ${c.texto}`
+    }, f.pct.toFixed(1), "%"))));
+  })))))));
+};
 const VentasVendedorDashboard = ({
   userId,
   sales,
   metas,
   cartera,
-  activeTab
+  activeTab,
+  incentivos
 }) => {
   const [expandedClient, setExpandedClient] = useState(null);
   const [expandedGrupo, setExpandedGrupo] = useState(null);
@@ -9772,6 +11333,10 @@ const VentasVendedorDashboard = ({
   }, "Limpiar")), React.createElement(TopKPIsBar, {
     stats: stats,
     meta: myMeta
+  }), React.createElement(IncentivosCard, {
+    sales: sales,
+    userId: userId,
+    incentivos: incentivos
   }), React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-6"
   }, React.createElement("div", {
@@ -11881,6 +13446,9 @@ const VentasAdminPanel = ({
     id: 'ventas-cartera-activacion',
     label: 'Cartera / Activación'
   }, {
+    id: 'incentivos-admin',
+    label: 'Incentivos (Configuración)'
+  }, {
     id: 'pedidos-vendedor',
     label: 'Toma de Pedidos'
   }, {
@@ -13854,7 +15422,7 @@ function App() {
   const [loginError, setLoginError] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [globalActiveTab, setGlobalActiveTab] = useState('ventas-mes');
-  const PREFERRED_TABS = ['ventas-global', 'ventas-mes', 'pedidos-vendedor', 'pedidos-admin', 'ventas-historico', 'ventas-cartera-activacion', 'cxc', 'pagos-admin', 'pagos-reportar', 'tasas-admin', 'ventas-ia', 'share-ventas', 'gerente-mapa', 'guia'];
+  const PREFERRED_TABS = ['ventas-global', 'ventas-mes', 'pedidos-vendedor', 'pedidos-admin', 'ventas-historico', 'ventas-cartera-activacion', 'incentivos-admin', 'cxc', 'pagos-admin', 'pagos-reportar', 'tasas-admin', 'ventas-ia', 'share-ventas', 'gerente-mapa', 'guia'];
   const hasPermForUser = (id, user) => {
     if (!user) return false;
     if (user.rol === 'admin' && (!user.permisos || !Array.isArray(user.permisos) || user.permisos.length === 0)) return true;
@@ -13870,6 +15438,7 @@ function App() {
     if (id === 'ventas-ia') return rol === 'admin' || rol === 'gerente';
     if (id === 'share-ventas') return rol === 'admin' || rol === 'gerente';
     if (id === 'ventas-cartera-activacion') return true;
+    if (id === 'incentivos-admin') return rol === 'admin';
     if (id === 'pedidos-vendedor') return true;
     if (id === 'pedidos-admin') return rol === 'admin' || rol === 'gerente';
     if (id === 'gerente-mapa') return rol === 'admin' || rol === 'gerente';
@@ -14418,7 +15987,10 @@ function App() {
   }, "Market Share"), hasPerm('ventas-cartera-activacion') && React.createElement(NavBtn, {
     id: "ventas-cartera-activacion",
     icon: BookOpen
-  }, "Cartera (activación)"), React.createElement("p", {
+  }, "Cartera (activación)"), hasPerm('incentivos-admin') && React.createElement(NavBtn, {
+    id: "incentivos-admin",
+    icon: Award
+  }, "Incentivos"), React.createElement("p", {
     className: "text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1"
   }, "Pedidos y Finanzas"), hasPerm('pedidos-vendedor') && React.createElement(NavBtn, {
     id: "pedidos-vendedor",
@@ -14495,7 +16067,7 @@ function App() {
     size: 20
   })))), React.createElement("div", {
     className: "bg-white border-b border-slate-200 flex md:hidden overflow-x-auto print-hide"
-  }, [...(hasPerm('ventas-global') ? [['ventas-global', 'Corp.']] : []), ...(hasPerm('ventas-mes') ? [['ventas-mes', 'Mes']] : []), ...(hasPerm('ventas-historico') ? [['ventas-historico', 'Hist.']] : []), ...(hasPerm('ventas-ia') ? [['ventas-ia', 'IA']] : []), ...(hasPerm('share-ventas') ? [['share-ventas', 'M.Share']] : []), ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []), ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []), ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []), ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []), ...(hasPerm('pagos-reportar') ? [['pagos-reportar', 'Rep.Pagos']] : []), ...(hasPerm('pagos-admin') ? [['pagos-admin', 'Pagos']] : []), ...(hasPerm('tasas-admin') ? [['tasas-admin', 'Tasa']] : []), ...(hasPerm('gerente-mapa') ? [['gerente-mapa', 'Mapa']] : []), ...(hasPerm('guia') ? [['guia', 'Guía']] : [])].map(([id, label]) => React.createElement("button", {
+  }, [...(hasPerm('ventas-global') ? [['ventas-global', 'Corp.']] : []), ...(hasPerm('ventas-mes') ? [['ventas-mes', 'Mes']] : []), ...(hasPerm('ventas-historico') ? [['ventas-historico', 'Hist.']] : []), ...(hasPerm('ventas-ia') ? [['ventas-ia', 'IA']] : []), ...(hasPerm('share-ventas') ? [['share-ventas', 'M.Share']] : []), ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []), ...(hasPerm('incentivos-admin') ? [['incentivos-admin', 'Incent.']] : []), ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []), ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []), ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []), ...(hasPerm('pagos-reportar') ? [['pagos-reportar', 'Rep.Pagos']] : []), ...(hasPerm('pagos-admin') ? [['pagos-admin', 'Pagos']] : []), ...(hasPerm('tasas-admin') ? [['tasas-admin', 'Tasa']] : []), ...(hasPerm('gerente-mapa') ? [['gerente-mapa', 'Mapa']] : []), ...(hasPerm('guia') ? [['guia', 'Guía']] : [])].map(([id, label]) => React.createElement("button", {
     key: id,
     onClick: () => setGlobalActiveTab(id),
     className: `px-3 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${globalActiveTab === id ? 'border-orange-400 text-orange-200' : 'border-transparent text-blue-200'}`
@@ -14564,7 +16136,8 @@ function App() {
     sales: deferredSalesData,
     metas: metasDiccionario,
     cartera: carteraData,
-    activeTab: "dashboard"
+    activeTab: "dashboard",
+    incentivos: appConfig && appConfig.incentivos
   }), globalActiveTab === 'ventas-mes' && (currentUser.rol === 'gerente' || currentUser.rol === 'admin') && React.createElement(GerenteDashboard, {
     userId: currentUser.id,
     users: users,
@@ -14572,6 +16145,14 @@ function App() {
     cartera: carteraData,
     cxc: cxcData,
     currentUser: currentUser
+  }), globalActiveTab === 'incentivos-admin' && hasPerm('incentivos-admin') && React.createElement(IncentivosAdminPanel, {
+    sales: deferredSalesData,
+    users: users,
+    catalog: catalogData,
+    appConfig: appConfig,
+    openModal: openModal,
+    db: db,
+    getCollectionPath: getCollectionPath
   }), globalActiveTab === 'ventas-global' && currentUser.rol === 'admin' && React.createElement(VentasAdminPanel, {
     sales: deferredSalesData,
     setSales: setSalesData,
