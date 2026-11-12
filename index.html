@@ -2671,7 +2671,7 @@ const PagoSoportesModal = ({
     lista: soportes.filter(x => x.tipo === 'retencion')
   }].filter(g => g.lista.length > 0);
   return React.createElement("div", {
-    className: "fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+    className: "fixed inset-0 z-[200] flex items-center justify-center p-4 md:pl-[19rem] bg-slate-900/60 backdrop-blur-sm"
   }, React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
   }, React.createElement("div", {
@@ -3278,7 +3278,7 @@ const PagosVendedorView = ({
     className: "mt-2 text-xs font-bold text-slate-500 hover:text-slate-800"
   }, "Cancelar")) : React.createElement("button", {
     onClick: () => setBuscandoCliente(true),
-    className: agregarCls + ' border-blue-200 text-blue-700 hover:bg-blue-50 !mt-0'
+    className: agregarCls + ' border-blue-200 text-blue-700 hover:bg-blue-50'
   }, React.createElement(Plus, {
     size: 16
   }), " Agregar otro cliente a este recibo"))), React.createElement("div", null, React.createElement("p", {
@@ -10264,38 +10264,69 @@ const INCENTIVO_TIPOS = [{
 const incentivoTipoLabel = t => (INCENTIVO_TIPOS.find(x => x.id === t) || {
   label: String(t || '')
 }).label;
+const INCENTIVO_UNIDADES = [{
+  id: 'cajas',
+  label: 'Cajas'
+}, {
+  id: 'kilos',
+  label: 'Kilos'
+}];
+const unidadValida = u => u === 'kilos' ? 'kilos' : 'cajas';
+const unidadLabel = u => u === 'kilos' ? 'kilos' : 'cajas';
 const aNumeroIncentivo = v => {
   const n = Number(String(v === undefined || v === null ? '' : v).replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
-const fmtCajas = n => Number(n || 0).toLocaleString(undefined, {
-  maximumFractionDigits: 2
-});
+const fmtCant = n => {
+  const x = Number(n);
+  return (Number.isFinite(x) ? x : 0).toLocaleString(undefined, {
+    maximumFractionDigits: 2
+  });
+};
+const hayValor = v => v !== undefined && v !== null && String(v).trim() !== '';
+const cmpRuta = (a, b) => {
+  const na = parseInt(String(a).replace(/\D/g, ''), 10),
+    nb = parseInt(String(b).replace(/\D/g, ''), 10);
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true
+  });
+};
 const normalizarIncentivos = lista => (Array.isArray(lista) ? lista : []).filter(i => i && i.tipo && String(i.valor || '').trim()).map((i, n) => ({
   id: String(i.id || `inc${n}`),
   tipo: String(i.tipo),
   valor: String(i.valor).trim(),
+  unidad: unidadValida(i.unidad),
   objetivo: aNumeroIncentivo(i.objetivo) > 0 ? aNumeroIncentivo(i.objetivo) : 0,
-  porVendedor: i.porVendedor && typeof i.porVendedor === 'object' ? i.porVendedor : {}
+  porVendedor: i.porVendedor && typeof i.porVendedor === 'object' ? i.porVendedor : {},
+  unidadVendedor: i.unidadVendedor && typeof i.unidadVendedor === 'object' ? i.unidadVendedor : {}
 }));
 const limpiarIncentivos = lista => (lista || []).filter(i => i && String(i.valor || '').trim()).map(i => {
-  const pv = {};
+  const unidad = unidadValida(i.unidad);
+  const pv = {},
+    uv = {};
   Object.entries(i.porVendedor || {}).forEach(([k, v]) => {
-    if (String(v === undefined || v === null ? '' : v).trim() === '') return;
-    const n = aNumeroIncentivo(v);
-    if (n >= 0) pv[k] = n;
+    if (!hayValor(v)) return;
+    const n = Number(String(v).replace(',', '.'));
+    if (!Number.isFinite(n) || n < 0) return;
+    pv[k] = n;
+    const u = (i.unidadVendedor || {})[k];
+    if ((u === 'kilos' || u === 'cajas') && u !== unidad) uv[k] = u;
   });
   return {
     id: i.id,
     tipo: i.tipo,
     valor: String(i.valor).trim(),
+    unidad,
     objetivo: aNumeroIncentivo(i.objetivo) > 0 ? aNumeroIncentivo(i.objetivo) : 0,
-    porVendedor: pv
+    porVendedor: pv,
+    unidadVendedor: uv
   };
 });
 const firmaIncentivos = lista => JSON.stringify(limpiarIncentivos(lista).map(i => ({
   ...i,
-  porVendedor: Object.fromEntries(Object.entries(i.porVendedor).sort((a, b) => a[0].localeCompare(b[0])))
+  porVendedor: Object.fromEntries(Object.entries(i.porVendedor).sort((a, b) => a[0].localeCompare(b[0]))),
+  unidadVendedor: Object.fromEntries(Object.entries(i.unidadVendedor).sort((a, b) => a[0].localeCompare(b[0])))
 })).sort((a, b) => a.id.localeCompare(b.id)));
 const mesEnCursoDeVentas = sales => {
   const cm = (sales || []).filter(s => s.source === 'currMonth');
@@ -10322,17 +10353,73 @@ const objetivoIncentivo = (item, vendedorId) => {
   }
   return item.objetivo || 0;
 };
+const unidadIncentivo = (item, vendedorId) => {
+  const nid = normalizeId(vendedorId);
+  const pv = item.porVendedor || {};
+  const k = Object.keys(pv).find(x => normalizeId(x) === nid);
+  if (k !== undefined && hayValor(pv[k])) {
+    const u = (item.unidadVendedor || {})[k];
+    if (u === 'kilos' || u === 'cajas') return u;
+  }
+  return unidadValida(item.unidad);
+};
+const vendidoIncentivo = (item, filas, unidad) => {
+  let total = 0;
+  for (let i = 0; i < filas.length; i++) {
+    if (incentivoCoincide(item, filas[i])) total += Number(unidad === 'kilos' ? filas[i].kilos : filas[i].cajas) || 0;
+  }
+  return Math.round(total * 100) / 100;
+};
+const resumenVentasIncentivos = filas => {
+  const r = {
+    empresa: new Map(),
+    marca: new Map(),
+    subgrupo: new Map(),
+    producto: new Map()
+  };
+  const tipos = Object.keys(r);
+  const normalizados = new Map();
+  for (let i = 0; i < filas.length; i++) {
+    const f = filas[i];
+    const cajas = Number(f.cajas) || 0,
+      kilos = Number(f.kilos) || 0;
+    for (let t = 0; t < tipos.length; t++) {
+      const v = valorFilaIncentivo(tipos[t], f);
+      let k = normalizados.get(v);
+      if (k === undefined) {
+        k = normalizeName(v);
+        normalizados.set(v, k);
+      }
+      if (!k) continue;
+      const a = r[tipos[t]].get(k);
+      if (a) {
+        a.cajas += cajas;
+        a.kilos += kilos;
+      } else r[tipos[t]].set(k, {
+        cajas,
+        kilos
+      });
+    }
+  }
+  return r;
+};
+const SIN_RESUMEN = resumenVentasIncentivos([]);
+const vendidoDeResumen = (item, resumen, unidad) => {
+  const k = normalizeName(item.valor);
+  const a = k ? (resumen[item.tipo] || resumen.producto).get(k) : null;
+  return a ? Math.round((unidad === 'kilos' ? a.kilos : a.cajas) * 100) / 100 : 0;
+};
 const calcularIncentivos = (items, filas, vendedorId) => items.map(item => {
   const objetivo = objetivoIncentivo(item, vendedorId);
-  let cajas = 0;
-  for (let i = 0; i < filas.length; i++) if (incentivoCoincide(item, filas[i])) cajas += Number(filas[i].cajas) || 0;
-  cajas = Math.round(cajas * 100) / 100;
+  const unidad = unidadIncentivo(item, vendedorId);
+  const vendido = vendidoIncentivo(item, filas, unidad);
   return {
     ...item,
     objetivo,
-    cajas,
-    falta: Math.max(objetivo - cajas, 0),
-    pct: objetivo > 0 ? cajas / objetivo * 100 : 0
+    unidad,
+    vendido,
+    falta: Math.max(objetivo - vendido, 0),
+    pct: objetivo > 0 ? vendido / objetivo * 100 : 0
   };
 }).filter(r => r.objetivo > 0);
 const colorIncentivo = pct => pct >= 100 ? {
@@ -10345,16 +10432,69 @@ const colorIncentivo = pct => pct >= 100 ? {
   barra: 'bg-orange-500',
   texto: 'text-orange-600'
 };
+const totalesPorUnidad = filas => {
+  const m = new Map();
+  filas.forEach(f => {
+    if (f.pct === null || f.pct === undefined) return;
+    const t = m.get(f.unidad) || {
+      unidad: f.unidad,
+      objetivo: 0,
+      vendido: 0,
+      falta: 0,
+      n: 0
+    };
+    t.objetivo += f.objetivo;
+    t.vendido += f.vendido;
+    t.falta += f.falta;
+    t.n++;
+    m.set(f.unidad, t);
+  });
+  return Array.from(m.values()).map(t => ({
+    ...t,
+    objetivo: Math.round(t.objetivo * 100) / 100,
+    vendido: Math.round(t.vendido * 100) / 100,
+    falta: Math.round(t.falta * 100) / 100,
+    pct: t.objetivo > 0 ? t.vendido / t.objetivo * 100 : 0
+  })).sort((a, b) => a.unidad.localeCompare(b.unidad));
+};
+const UnidadTag = ({
+  u
+}) => React.createElement("span", {
+  className: `inline-block text-[10px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded ${u === 'kilos' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'}`
+}, unidadLabel(u));
+const BarraPct = ({
+  pct
+}) => {
+  const c = colorIncentivo(pct || 0);
+  return React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, React.createElement("div", {
+    className: "flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden"
+  }, React.createElement("div", {
+    className: `h-full rounded-full ${c.barra}`,
+    style: {
+      width: `${Math.min(pct, 100)}%`
+    }
+  })), React.createElement("span", {
+    className: `font-black text-sm w-16 text-right ${c.texto}`
+  }, pct.toFixed(1), "%"));
+};
+const incentivoSelUnidad = "border-2 border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 const IncentivoTabla = ({
   titulo,
   filas,
   mostrarTipo
 }) => {
   if (filas.length === 0) return null;
+  const subtitulo = r => React.createElement("span", {
+    className: "text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+  }, mostrarTipo ? `${incentivoTipoLabel(r.tipo)} · ` : '', React.createElement("span", {
+    className: r.unidad === 'kilos' ? 'text-purple-600' : ''
+  }, "en ", unidadLabel(r.unidad)));
   return React.createElement("div", null, React.createElement("h4", {
     className: "text-sm font-black text-slate-700 uppercase tracking-wider mb-2"
   }, titulo), React.createElement("div", {
-    className: "overflow-x-auto border border-slate-100 rounded-xl"
+    className: "hidden sm:block overflow-x-auto border border-slate-100 rounded-xl"
   }, React.createElement("table", {
     className: "w-full text-sm min-w-[620px] table-fixed"
   }, React.createElement("colgroup", null, React.createElement("col", {
@@ -10383,9 +10523,9 @@ const IncentivoTabla = ({
     className: "text-left px-4 py-3"
   }, mostrarTipo ? 'Marca / producto' : 'Empresa'), React.createElement("th", {
     className: "text-right px-3 py-3"
-  }, "Objetivo (cajas)"), React.createElement("th", {
+  }, "Objetivo"), React.createElement("th", {
     className: "text-right px-3 py-3"
-  }, "Vendidas"), React.createElement("th", {
+  }, "Vendido"), React.createElement("th", {
     className: "text-right px-3 py-3"
   }, "Te faltan"), React.createElement("th", {
     className: "text-left px-4 py-3"
@@ -10399,15 +10539,13 @@ const IncentivoTabla = ({
       className: "px-4 py-3"
     }, React.createElement("p", {
       className: "font-black text-slate-800 leading-tight"
-    }, r.valor), mostrarTipo && React.createElement("span", {
-      className: "text-[10px] font-bold text-slate-400 uppercase tracking-wide"
-    }, incentivoTipoLabel(r.tipo))), React.createElement("td", {
+    }, r.valor), subtitulo(r)), React.createElement("td", {
       className: "px-3 py-3 text-right font-bold text-slate-600"
-    }, fmtCajas(r.objetivo)), React.createElement("td", {
+    }, fmtCant(r.objetivo)), React.createElement("td", {
       className: "px-3 py-3 text-right font-black text-blue-900"
-    }, fmtCajas(r.cajas)), React.createElement("td", {
+    }, fmtCant(r.vendido)), React.createElement("td", {
       className: `px-3 py-3 text-right font-black ${r.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
-    }, fmtCajas(r.falta)), React.createElement("td", {
+    }, fmtCant(r.falta)), React.createElement("td", {
       className: "px-4 py-3"
     }, React.createElement("div", {
       className: "flex items-center gap-3"
@@ -10423,7 +10561,46 @@ const IncentivoTabla = ({
     }, r.pct.toFixed(1), "%")), r.pct >= 100 && React.createElement("span", {
       className: "inline-block mt-1 text-[10px] font-black text-green-700 bg-green-100 px-2 py-0.5 rounded-full"
     }, "¡Cumplido!")));
-  })))));
+  })))), React.createElement("div", {
+    className: "sm:hidden space-y-2.5"
+  }, filas.map(r => {
+    const c = colorIncentivo(r.pct);
+    return React.createElement("div", {
+      key: r.id,
+      className: "border border-slate-100 rounded-xl p-3.5"
+    }, React.createElement("div", {
+      className: "flex items-start justify-between gap-3"
+    }, React.createElement("div", {
+      className: "min-w-0"
+    }, React.createElement("p", {
+      className: "font-black text-slate-800 leading-tight"
+    }, r.valor), subtitulo(r)), React.createElement("span", {
+      className: `font-black text-xl shrink-0 ${c.texto}`
+    }, r.pct.toFixed(1), "%")), React.createElement("div", {
+      className: "bg-slate-200 rounded-full h-2.5 overflow-hidden mt-2.5"
+    }, React.createElement("div", {
+      className: `h-full rounded-full ${c.barra}`,
+      style: {
+        width: `${Math.min(r.pct, 100)}%`
+      }
+    })), r.pct >= 100 && React.createElement("span", {
+      className: "inline-block mt-1.5 text-[10px] font-black text-green-700 bg-green-100 px-2 py-0.5 rounded-full"
+    }, "¡Cumplido!"), React.createElement("div", {
+      className: "grid grid-cols-3 gap-2 mt-3 text-center"
+    }, React.createElement("div", null, React.createElement("p", {
+      className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
+    }, "Objetivo"), React.createElement("p", {
+      className: "font-bold text-slate-600"
+    }, fmtCant(r.objetivo))), React.createElement("div", null, React.createElement("p", {
+      className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
+    }, "Vendido"), React.createElement("p", {
+      className: "font-black text-blue-900"
+    }, fmtCant(r.vendido))), React.createElement("div", null, React.createElement("p", {
+      className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
+    }, "Te faltan"), React.createElement("p", {
+      className: `font-black ${r.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+    }, fmtCant(r.falta)))));
+  })));
 };
 const IncentivosCard = ({
   sales,
@@ -10446,7 +10623,7 @@ const IncentivosCard = ({
       filas: (sales || []).filter(s => esFilaDeVendedor(s, userId, nid) && esFilaDelMes(s, mes))
     };
   }, [sales, userId, items]);
-  const resultados = useMemo(() => calcularIncentivos(items, filas, userId), [items, filas, userId]);
+  const resultados = useMemo(() => calcularIncentivos(items, filas, userId).sort((a, b) => a.valor.localeCompare(b.valor)), [items, filas, userId]);
   if (resultados.length === 0) return null;
   const empresas = resultados.filter(r => r.tipo === 'empresa');
   const otros = resultados.filter(r => r.tipo !== 'empresa');
@@ -10461,7 +10638,7 @@ const IncentivosCard = ({
     className: "text-orange-400"
   }), " Incentivos"), React.createElement("p", {
     className: "text-sm text-blue-200 mt-1 font-medium"
-  }, "Cajas que llevas vendidas este mes frente al objetivo de cada incentivo.")), React.createElement("span", {
+  }, "Lo que llevas vendido este mes frente al objetivo de cada incentivo, en cajas o en kilos.")), React.createElement("span", {
     className: "bg-white/20 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-sm backdrop-blur border border-white/30"
   }, "Mes en Curso: ", formatMonthStr(mesStr))), React.createElement("div", {
     className: "p-5 md:p-6 space-y-6"
@@ -10490,10 +10667,12 @@ const IncentivoFilaAdmin = ({
   onToggle,
   onChange,
   onChangeVendedor,
+  onChangeUnidadVendedor,
   onRemove
 }) => {
   const valorInput = v => v === '' || v === 0 || v === null || v === undefined ? '' : String(v);
-  const propios = Object.values(item.porVendedor || {}).filter(v => String(v === undefined || v === null ? '' : v).trim() !== '').length;
+  const unidadGeneral = unidadValida(item.unidad);
+  const propios = Object.values(item.porVendedor || {}).filter(hayValor).length;
   return React.createElement("div", {
     className: "border border-slate-100 rounded-xl overflow-hidden bg-white"
   }, React.createElement("div", {
@@ -10508,7 +10687,7 @@ const IncentivoFilaAdmin = ({
     className: "flex items-center gap-2"
   }, React.createElement("span", {
     className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
-  }, "Objetivo (cajas)"), React.createElement("input", {
+  }, "Objetivo"), React.createElement("input", {
     type: "text",
     inputMode: "decimal",
     placeholder: "0",
@@ -10517,7 +10696,17 @@ const IncentivoFilaAdmin = ({
       objetivo: normalizarEntradaDecimal(e.target.value)
     }),
     className: "w-24 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-right outline-none focus:border-blue-500"
-  })), React.createElement("button", {
+  }), React.createElement("select", {
+    value: unidadGeneral,
+    onChange: e => onChange(item.id, {
+      unidad: e.target.value
+    }),
+    className: incentivoSelUnidad + ' py-1.5',
+    title: "Unidad del objetivo general"
+  }, INCENTIVO_UNIDADES.map(u => React.createElement("option", {
+    key: u.id,
+    value: u.id
+  }, u.label)))), React.createElement("button", {
     onClick: () => onToggle(item.id),
     className: `text-xs font-bold px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 ${abierto ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700'}`
   }, React.createElement(Users, {
@@ -10534,26 +10723,88 @@ const IncentivoFilaAdmin = ({
     className: "bg-slate-50 border-t border-slate-100 px-4 py-3"
   }, React.createElement("p", {
     className: "text-[11px] font-medium text-slate-500 mb-2"
-  }, "Objetivo propio de cada vendedor. En blanco se usa el objetivo general", item.objetivo > 0 ? ` (${fmtCajas(item.objetivo)})` : '', ". Pon 0 para que no aplique a ese vendedor."), React.createElement("div", {
-    className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto"
-  }, vendedores.map(v => React.createElement("label", {
-    key: v.id,
-    className: "flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-3 py-2"
-  }, React.createElement("span", {
-    className: "flex-1 min-w-0 truncate text-xs font-bold text-slate-700",
-    title: v.nombre
-  }, React.createElement("span", {
-    className: "font-mono text-slate-400 mr-1"
-  }, v.id), v.nombre), React.createElement("input", {
-    type: "text",
-    inputMode: "decimal",
-    placeholder: item.objetivo > 0 ? fmtCajas(item.objetivo) : '—',
-    value: (item.porVendedor || {})[v.id] === undefined ? '' : String((item.porVendedor || {})[v.id]),
-    onChange: e => onChangeVendedor(item.id, v.id, normalizarEntradaDecimal(e.target.value)),
-    className: "w-20 border-2 border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-right outline-none focus:border-blue-500"
-  }))), vendedores.length === 0 && React.createElement("p", {
+  }, "Objetivo propio de cada vendedor, por número de ruta. En blanco se usa el objetivo general", item.objetivo > 0 ? ` (${fmtCant(item.objetivo)} ${unidadLabel(unidadGeneral)})` : '', ". Pon 0 para que no aplique a ese vendedor. Cada vendedor usa la unidad del objetivo general; si el suyo es en otra (cajas o kilos), cámbiala en su fila."), React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-2 gap-2 max-h-80 overflow-y-auto"
+  }, vendedores.map(v => {
+    const propio = (item.porVendedor || {})[v.id];
+    const tiene = hayValor(propio);
+    const uv = (item.unidadVendedor || {})[v.id];
+    const unidadV = tiene && (uv === 'kilos' || uv === 'cajas') ? uv : unidadGeneral;
+    return React.createElement("label", {
+      key: v.id,
+      className: "flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-3 py-2"
+    }, React.createElement("span", {
+      className: "flex-1 min-w-0 truncate text-xs font-bold text-slate-700",
+      title: v.nombre
+    }, React.createElement("span", {
+      className: "font-mono text-slate-400 mr-1"
+    }, v.id), v.nombre), React.createElement("input", {
+      type: "text",
+      inputMode: "decimal",
+      placeholder: item.objetivo > 0 ? fmtCant(item.objetivo) : '—',
+      value: propio === undefined ? '' : String(propio),
+      onChange: e => onChangeVendedor(item.id, v.id, normalizarEntradaDecimal(e.target.value)),
+      className: "w-20 border-2 border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-right outline-none focus:border-blue-500"
+    }), React.createElement("select", {
+      value: unidadV,
+      disabled: !tiene,
+      onChange: e => onChangeUnidadVendedor(item.id, v.id, e.target.value),
+      className: incentivoSelUnidad,
+      title: tiene ? 'Unidad del objetivo de este vendedor' : 'Escribe primero su objetivo'
+    }, INCENTIVO_UNIDADES.map(u => React.createElement("option", {
+      key: u.id,
+      value: u.id
+    }, u.label))));
+  }), vendedores.length === 0 && React.createElement("p", {
     className: "text-xs text-slate-400 font-medium col-span-full"
   }, "No hay vendedores cargados."))));
+};
+const IncentivoFilaVendedor = ({
+  tipo,
+  valor,
+  item,
+  vendedorId,
+  mostrarTipo,
+  onTexto,
+  onUnidad
+}) => {
+  const unidadGeneral = item ? unidadValida(item.unidad) : 'cajas';
+  const general = item && item.objetivo > 0 ? item.objetivo : 0;
+  const propio = item ? (item.porVendedor || {})[vendedorId] : undefined;
+  const tiene = hayValor(propio);
+  const uv = item ? (item.unidadVendedor || {})[vendedorId] : undefined;
+  const unidadV = tiene && (uv === 'kilos' || uv === 'cajas') ? uv : unidadGeneral;
+  return React.createElement("div", {
+    className: `flex flex-wrap items-center gap-3 px-4 py-3 border rounded-xl bg-white ${tiene ? 'border-blue-200' : 'border-slate-100'}`
+  }, React.createElement("div", {
+    className: "flex-1 min-w-[160px]"
+  }, React.createElement("p", {
+    className: "font-black text-slate-800 text-sm leading-tight"
+  }, valor), mostrarTipo && React.createElement("span", {
+    className: "text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+  }, incentivoTipoLabel(tipo))), React.createElement("span", {
+    className: "text-[11px] font-bold text-slate-400"
+  }, general > 0 ? `General: ${fmtCant(general)} ${unidadLabel(unidadGeneral)}` : 'Sin objetivo general'), React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("span", {
+    className: "text-[10px] font-black uppercase tracking-wider text-slate-400"
+  }, "Su objetivo"), React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    placeholder: general > 0 ? fmtCant(general) : '—',
+    value: propio === undefined || propio === null ? '' : String(propio),
+    onChange: e => onTexto(tipo, valor, normalizarEntradaDecimal(e.target.value)),
+    className: "w-24 border-2 border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-right outline-none focus:border-blue-500"
+  }), React.createElement("select", {
+    value: unidadV,
+    disabled: !tiene,
+    onChange: e => onUnidad(tipo, valor, e.target.value),
+    className: incentivoSelUnidad + ' py-1.5',
+    title: tiene ? 'Unidad del objetivo de este vendedor' : 'Escribe primero su objetivo'
+  }, INCENTIVO_UNIDADES.map(u => React.createElement("option", {
+    key: u.id,
+    value: u.id
+  }, u.label)))));
 };
 const IncentivosAdminPanel = ({
   sales,
@@ -10568,31 +10819,48 @@ const IncentivosAdminPanel = ({
   const [items, setItems] = useState(() => normalizarIncentivos(appConfig && appConfig.incentivos));
   const guardadoRef = useRef(guardadoStr);
   const [vista, setVista] = useState('config');
+  const [modoCfg, setModoCfg] = useState('incentivo');
+  const [vendCfg, setVendCfg] = useState('');
+  const [busquedaVend, setBusquedaVend] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [abierto, setAbierto] = useState(null);
   const [empresaNueva, setEmpresaNueva] = useState('');
   const [tipoNuevo, setTipoNuevo] = useState('marca');
   const [valorNuevo, setValorNuevo] = useState('');
   const [objetivoNuevo, setObjetivoNuevo] = useState('');
+  const [unidadNueva, setUnidadNueva] = useState('cajas');
+  const [tipoVend, setTipoVend] = useState('marca');
+  const [valorVend, setValorVend] = useState('');
+  const [objetivoVend, setObjetivoVend] = useState('');
+  const [unidadVend, setUnidadVend] = useState('cajas');
+  const [modoAv, setModoAv] = useState('incentivo');
   const [avanceId, setAvanceId] = useState('');
+  const [avanceVend, setAvanceVend] = useState('');
+  const [ordenAv, setOrdenAv] = useState('ruta');
+  const [sinObjetivo, setSinObjetivo] = useState(false);
   useEffect(() => {
     if (guardadoRef.current === guardadoStr) return;
     setItems(prev => firmaIncentivos(prev) === guardadoRef.current ? normalizarIncentivos(appConfig && appConfig.incentivos) : prev);
     guardadoRef.current = guardadoStr;
   }, [guardadoStr]);
   const hayCambios = firmaIncentivos(items) !== guardadoStr;
-  const vendedores = useMemo(() => (users || []).filter(u => u.rol === 'vendedor').slice().sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')), [users]);
+  const vendedores = useMemo(() => (users || []).filter(u => u.rol === 'vendedor').slice().sort((a, b) => cmpRuta(a.id, b.id)), [users]);
   const conocidos = useMemo(() => {
-    const mk = () => new Map();
+    const mk = () => ({
+      m: new Map(),
+      vistos: new Set()
+    });
     const emp = mk(),
       marca = mk(),
       sub = mk(),
       prod = mk();
-    const add = (m, v) => {
-      const t = String(v || '').trim();
+    const add = (o, v) => {
+      if (!v || o.vistos.has(v)) return;
+      o.vistos.add(v);
+      const t = String(v).trim();
       if (t) {
         const k = normalizeName(t);
-        if (!m.has(k)) m.set(k, t);
+        if (!o.m.has(k)) o.m.set(k, t);
       }
     };
     (sales || []).forEach(s => {
@@ -10607,7 +10875,7 @@ const IncentivosAdminPanel = ({
         add(sub, p.subgrupo);
       }
     });
-    const ord = m => Array.from(m.values()).sort((a, b) => a.localeCompare(b));
+    const ord = o => Array.from(o.m.values()).sort((a, b) => a.localeCompare(b));
     return {
       empresa: ord(emp),
       marca: ord(marca),
@@ -10625,21 +10893,75 @@ const IncentivosAdminPanel = ({
     setItems(prev => prev.filter(i => i.id !== id));
     if (abierto === id) setAbierto(null);
   };
-  const cambiarVendedor = (id, vid, texto) => setItems(prev => prev.map(i => i.id !== id ? i : {
-    ...i,
-    porVendedor: {
-      ...(i.porVendedor || {}),
-      [vid]: texto
-    }
+  const cambiarVendedor = (id, vid, texto) => setItems(prev => prev.map(i => {
+    if (i.id !== id) return i;
+    const uv = {
+      ...(i.unidadVendedor || {})
+    };
+    if (!hayValor(texto)) delete uv[vid];
+    return {
+      ...i,
+      porVendedor: {
+        ...(i.porVendedor || {}),
+        [vid]: texto
+      },
+      unidadVendedor: uv
+    };
   }));
+  const cambiarUnidadVendedor = (id, vid, unidad) => setItems(prev => prev.map(i => {
+    if (i.id !== id) return i;
+    const uv = {
+      ...(i.unidadVendedor || {})
+    };
+    if (unidad === unidadValida(i.unidad)) delete uv[vid];else uv[vid] = unidad;
+    return {
+      ...i,
+      unidadVendedor: uv
+    };
+  }));
+  const editarVendedor = (tipo, valor, vid, cambios) => setItems(prev => {
+    const k = normalizeName(valor);
+    const idx = prev.findIndex(i => i.tipo === tipo && normalizeName(i.valor) === k);
+    const base = idx >= 0 ? prev[idx] : {
+      id: nuevoId(),
+      tipo,
+      valor,
+      unidad: 'cajas',
+      objetivo: '',
+      porVendedor: {},
+      unidadVendedor: {}
+    };
+    const pv = {
+        ...(base.porVendedor || {})
+      },
+      uv = {
+        ...(base.unidadVendedor || {})
+      };
+    if (cambios.texto !== undefined) {
+      pv[vid] = cambios.texto;
+      if (!hayValor(cambios.texto)) delete uv[vid];
+    }
+    if (cambios.unidad !== undefined) {
+      if (cambios.unidad === unidadValida(base.unidad)) delete uv[vid];else uv[vid] = cambios.unidad;
+    }
+    const sig = {
+      ...base,
+      porVendedor: pv,
+      unidadVendedor: uv
+    };
+    if (idx < 0) return hayValor(pv[vid]) ? [...prev, sig] : prev;
+    return prev.map((i, n) => n === idx ? sig : i);
+  });
   const agregarEmpresa = valor => {
     if (!valor || existe('empresa', valor)) return;
     setItems(prev => [...prev, {
       id: nuevoId(),
       tipo: 'empresa',
       valor,
+      unidad: 'cajas',
       objetivo: '',
-      porVendedor: {}
+      porVendedor: {},
+      unidadVendedor: {}
     }]);
   };
   const empresasQueFaltan = conocidos.empresa.filter(e => !existe('empresa', e));
@@ -10649,8 +10971,10 @@ const IncentivosAdminPanel = ({
         id: nuevoId(),
         tipo: 'empresa',
         valor: e,
+        unidad: 'cajas',
         objetivo: '',
-        porVendedor: {}
+        porVendedor: {},
+        unidadVendedor: {}
       }));
       return [...prev, ...nuevas];
     });
@@ -10669,11 +10993,34 @@ const IncentivosAdminPanel = ({
       id: nuevoId(),
       tipo: tipoNuevo,
       valor,
+      unidad: unidadNueva,
       objetivo: objetivoNuevo,
-      porVendedor: {}
+      porVendedor: {},
+      unidadVendedor: {}
     }]);
     setValorNuevo('');
     setObjetivoNuevo('');
+    setUnidadNueva('cajas');
+  };
+  const vendCfgObj = vendedores.find(v => v.id === vendCfg) || null;
+  const agregarDeVendedor = () => {
+    if (!vendCfgObj) return;
+    const valor = valorVend.trim();
+    if (!valor) {
+      openModal('alert', null, 'Falta el nombre', 'Escribe o elige la marca, subgrupo o producto.', true);
+      return;
+    }
+    if (!hayValor(objetivoVend)) {
+      openModal('alert', null, 'Falta el objetivo', 'Escribe el objetivo de este vendedor (pon 0 si no le aplica).', true);
+      return;
+    }
+    editarVendedor(tipoVend, valor, vendCfgObj.id, {
+      texto: objetivoVend,
+      unidad: unidadVend
+    });
+    setValorVend('');
+    setObjetivoVend('');
+    setUnidadVend('cajas');
   };
   const guardar = async () => {
     const limpio = limpiarIncentivos(items);
@@ -10704,39 +11051,200 @@ const IncentivosAdminPanel = ({
   const ordenar = lista => lista.slice().sort((a, b) => a.valor.localeCompare(b.valor));
   const empresas = ordenar(items.filter(i => i.tipo === 'empresa'));
   const otros = ordenar(items.filter(i => i.tipo !== 'empresa'));
+  const filasVendedorCfg = useMemo(() => {
+    if (modoCfg !== 'vendedor' || !vendCfgObj) return {
+      empresas: [],
+      otros: []
+    };
+    const clave = (t, v) => t + '|' + normalizeName(v);
+    const mapa = new Map(items.map(i => [clave(i.tipo, i.valor), i]));
+    const vistos = new Set();
+    const filasEmp = [];
+    conocidos.empresa.forEach(n => {
+      vistos.add(clave('empresa', n));
+      filasEmp.push({
+        tipo: 'empresa',
+        valor: n,
+        item: mapa.get(clave('empresa', n)) || null
+      });
+    });
+    items.filter(i => i.tipo === 'empresa' && !vistos.has(clave('empresa', i.valor))).forEach(i => filasEmp.push({
+      tipo: 'empresa',
+      valor: i.valor,
+      item: i
+    }));
+    filasEmp.sort((a, b) => a.valor.localeCompare(b.valor));
+    const filasOtros = items.filter(i => i.tipo !== 'empresa').map(i => ({
+      tipo: i.tipo,
+      valor: i.valor,
+      item: i
+    })).sort((a, b) => a.valor.localeCompare(b.valor));
+    return {
+      empresas: filasEmp,
+      otros: filasOtros
+    };
+  }, [modoCfg, vendCfgObj, items, conocidos]);
+  const qVend = busquedaVend.trim().toLowerCase();
+  const empresasVendVisibles = filasVendedorCfg.empresas.filter(f => !qVend || f.valor.toLowerCase().includes(qVend));
+  const propiosVend = vendCfgObj ? items.filter(i => hayValor((i.porVendedor || {})[vendCfgObj.id])).length : 0;
   const guardadas = useMemo(() => normalizarIncentivos(appConfig && appConfig.incentivos).filter(i => i.objetivo > 0 || Object.keys(i.porVendedor).length > 0).sort((a, b) => a.valor.localeCompare(b.valor)), [appConfig]);
   const mesStr = useMemo(() => vista === 'avance' ? mesEnCursoDeVentas(sales) : '', [sales, vista]);
-  const porVendedorFilas = useMemo(() => {
+  const resumenVend = useMemo(() => {
     if (vista !== 'avance') return new Map();
-    const m = new Map();
+    const grupos = new Map();
     (sales || []).forEach(s => {
       if (!esFilaDelMes(s, mesStr)) return;
       const k = normalizeId(s.idVendedor);
-      if (!m.has(k)) m.set(k, []);
-      m.get(k).push(s);
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(s);
     });
+    const m = new Map();
+    grupos.forEach((rows, k) => m.set(k, resumenVentasIncentivos(rows)));
     return m;
   }, [sales, mesStr, vista]);
+  const avanceDe = (item, vendedorId) => {
+    const resumen = resumenVend.get(normalizeId(vendedorId)) || SIN_RESUMEN;
+    const objetivo = objetivoIncentivo(item, vendedorId);
+    const unidad = unidadIncentivo(item, vendedorId);
+    const vendido = vendidoDeResumen(item, resumen, unidad);
+    return {
+      objetivo,
+      unidad,
+      vendido,
+      falta: Math.max(objetivo - vendido, 0),
+      pct: objetivo > 0 ? vendido / objetivo * 100 : null
+    };
+  };
   const itemAvance = guardadas.find(i => i.id === avanceId) || guardadas[0] || null;
-  const filasAvance = useMemo(() => {
-    if (vista !== 'avance' || !itemAvance) return [];
-    return vendedores.map(u => {
-      const rows = porVendedorFilas.get(normalizeId(u.id)) || [];
-      const objetivo = objetivoIncentivo(itemAvance, u.id);
-      let cajas = 0;
-      for (let i = 0; i < rows.length; i++) if (incentivoCoincide(itemAvance, rows[i])) cajas += Number(rows[i].cajas) || 0;
-      cajas = Math.round(cajas * 100) / 100;
-      return {
+  const vendAv = vendedores.find(v => v.id === avanceVend) || vendedores[0] || null;
+  const avPorIncentivo = useMemo(() => {
+    if (vista !== 'avance' || modoAv !== 'incentivo' || !itemAvance) return {
+      filas: [],
+      totales: [],
+      sinObjetivoVendido: 0
+    };
+    const filas = vendedores.map(u => ({
+      u,
+      ...avanceDe(itemAvance, u.id)
+    }));
+    const totales = totalesPorUnidad(filas);
+    const sinObjetivoVendido = Math.round(filas.filter(f => f.pct === null).reduce((a, f) => a + f.vendido, 0) * 100) / 100;
+    filas.sort((a, b) => ordenAv === 'pct' ? (b.pct === null ? -1 : b.pct) - (a.pct === null ? -1 : a.pct) : cmpRuta(a.u.id, b.u.id));
+    return {
+      filas,
+      totales,
+      sinObjetivoVendido
+    };
+  }, [vista, modoAv, itemAvance, vendedores, resumenVend, ordenAv]);
+  const avPorVendedor = useMemo(() => {
+    if (vista !== 'avance' || modoAv !== 'vendedor' || !vendAv) return {
+      empresas: [],
+      otros: [],
+      totales: []
+    };
+    const resumenV = resumenVend.get(normalizeId(vendAv.id)) || SIN_RESUMEN;
+    const todas = guardadas.map(item => ({
+      item,
+      ...avanceDe(item, vendAv.id)
+    })).filter(f => f.pct !== null);
+    const filasEmp = todas.filter(f => f.item.tipo === 'empresa');
+    const filasOtros = todas.filter(f => f.item.tipo !== 'empresa');
+    if (sinObjetivo) {
+      conocidos.empresa.forEach(n => {
+        if (filasEmp.some(f => normalizeName(f.item.valor) === normalizeName(n))) return;
+        const it = {
+          id: 'sin:' + n,
+          tipo: 'empresa',
+          valor: n,
+          unidad: 'cajas',
+          objetivo: 0,
+          porVendedor: {},
+          unidadVendedor: {}
+        };
+        const vendido = vendidoDeResumen(it, resumenV, 'cajas');
+        if (vendido > 0) filasEmp.push({
+          item: it,
+          objetivo: 0,
+          unidad: 'cajas',
+          vendido,
+          falta: 0,
+          pct: null
+        });
+      });
+    }
+    const porNombre = (a, b) => a.item.valor.localeCompare(b.item.valor);
+    filasEmp.sort(porNombre);
+    filasOtros.sort(porNombre);
+    return {
+      empresas: filasEmp,
+      otros: filasOtros,
+      totales: totalesPorUnidad(filasEmp)
+    };
+  }, [vista, modoAv, vendAv, guardadas, resumenVend, conocidos, sinObjetivo]);
+  const avTotales = useMemo(() => {
+    if (vista !== 'avance' || modoAv !== 'totales') return {
+      empresas: [],
+      otros: [],
+      totalEmpresas: []
+    };
+    const lista = guardadas.map(item => {
+      const filas = vendedores.map(u => ({
         u,
-        objetivo,
-        cajas,
-        falta: Math.max(objetivo - cajas, 0),
-        pct: objetivo > 0 ? cajas / objetivo * 100 : null
+        ...avanceDe(item, u.id)
+      }));
+      return {
+        item,
+        tot: totalesPorUnidad(filas)
       };
-    }).sort((a, b) => (b.pct === null ? -1 : b.pct) - (a.pct === null ? -1 : a.pct));
-  }, [vista, itemAvance, vendedores, porVendedorFilas]);
+    }).filter(x => x.tot.length > 0);
+    const filasEmp = lista.filter(x => x.item.tipo === 'empresa');
+    const filasOtros = lista.filter(x => x.item.tipo !== 'empresa');
+    const sumas = [];
+    filasEmp.forEach(x => x.tot.forEach(t => sumas.push({
+      unidad: t.unidad,
+      objetivo: t.objetivo,
+      vendido: t.vendido,
+      falta: t.falta,
+      pct: 0
+    })));
+    return {
+      empresas: filasEmp,
+      otros: filasOtros,
+      totalEmpresas: totalesPorUnidad(sumas)
+    };
+  }, [vista, modoAv, guardadas, vendedores, resumenVend]);
   const inputSel = "border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-white";
   const lblCls = "text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1";
+  const segBtn = activo => `px-4 py-2 rounded-lg text-sm font-bold transition-all ${activo ? 'bg-white shadow text-blue-900' : 'text-slate-500 hover:text-slate-700'}`;
+  const thAv = "text-right px-3 py-3";
+  const mesChip = React.createElement("span", {
+    className: "bg-slate-100 text-slate-600 px-4 py-1.5 rounded-full text-xs font-bold"
+  }, "Mes en Curso: ", formatMonthStr(mesStr));
+  const notaFaltan = React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-400 mt-2"
+  }, "En el total, \"Faltan\" suma lo que le falta a cada fila que aún no llega a su objetivo: lo que unos venden de más no se resta a los demás.");
+  const filasTotal = (tot, etiqueta, columnaExtra) => tot.map(t => React.createElement("tr", {
+    key: etiqueta + t.unidad,
+    className: "bg-slate-100 font-black"
+  }, React.createElement("td", {
+    className: "px-4 py-3 text-xs uppercase tracking-wider text-slate-700"
+  }, etiqueta), React.createElement("td", {
+    className: "px-3 py-3 text-center"
+  }, React.createElement(UnidadTag, {
+    u: t.unidad
+  })), columnaExtra && React.createElement("td", {
+    className: "px-3 py-3"
+  }), React.createElement("td", {
+    className: "px-3 py-3 text-right text-slate-700"
+  }, fmtCant(t.objetivo)), React.createElement("td", {
+    className: "px-3 py-3 text-right text-blue-900"
+  }, fmtCant(t.vendido)), React.createElement("td", {
+    className: `px-3 py-3 text-right ${t.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+  }, fmtCant(t.falta)), React.createElement("td", {
+    className: "px-4 py-3"
+  }, React.createElement(BarraPct, {
+    pct: t.pct
+  }))));
   return React.createElement("div", {
     className: "space-y-6 animate-fadeIn p-4 md:p-8"
   }, React.createElement("div", {
@@ -10749,21 +11257,46 @@ const IncentivosAdminPanel = ({
     className: "text-orange-500"
   }), " Incentivos"), React.createElement("p", {
     className: "text-slate-500 text-sm font-medium mt-1"
-  }, "Define cuántas cajas debe vender cada vendedor este mes. Ellos lo ven en Indicadores, en la tarjeta Incentivos.")), React.createElement("div", {
+  }, "Define cuántas cajas (o kilos) debe vender cada vendedor este mes. Ellos lo ven en Indicadores, en la tarjeta Incentivos.")), React.createElement("div", {
     className: "flex bg-slate-100 p-1 rounded-xl shrink-0"
   }, React.createElement("button", {
     onClick: () => setVista('config'),
-    className: `px-4 py-2 rounded-lg text-sm font-bold transition-all ${vista === 'config' ? 'bg-white shadow text-blue-900' : 'text-slate-500 hover:text-slate-700'}`
+    className: segBtn(vista === 'config')
   }, "Configurar"), React.createElement("button", {
     onClick: () => setVista('avance'),
-    className: `px-4 py-2 rounded-lg text-sm font-bold transition-all ${vista === 'avance' ? 'bg-white shadow text-blue-900' : 'text-slate-500 hover:text-slate-700'}`
+    className: segBtn(vista === 'avance')
   }, "Avance del mes"))), vista === 'config' && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "flex flex-wrap items-end gap-3"
+  }, React.createElement("div", {
+    className: "flex bg-slate-100 p-1 rounded-xl"
+  }, React.createElement("button", {
+    onClick: () => setModoCfg('incentivo'),
+    className: segBtn(modoCfg === 'incentivo')
+  }, "Por incentivo"), React.createElement("button", {
+    onClick: () => setModoCfg('vendedor'),
+    className: segBtn(modoCfg === 'vendedor')
+  }, "Por vendedor")), modoCfg === 'vendedor' && React.createElement("div", {
+    className: "min-w-[260px] flex-1 max-w-md"
+  }, React.createElement("label", {
+    className: lblCls
+  }, "Vendedor (por ruta)"), React.createElement("select", {
+    value: vendCfg,
+    onChange: e => setVendCfg(e.target.value),
+    className: inputSel + ' w-full'
+  }, React.createElement("option", {
+    value: ""
+  }, "Elige un vendedor…"), vendedores.map(v => React.createElement("option", {
+    key: v.id,
+    value: v.id
+  }, v.id, " · ", v.nombre))))), modoCfg === 'incentivo' && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "bg-blue-50 border border-blue-100 rounded-2xl px-5 py-4 text-sm text-blue-900 font-medium"
   }, React.createElement("span", {
     className: "font-black"
-  }, "Cómo se usa:"), " 1) Agrega las empresas. 2) Escribe el objetivo en cajas de cada una. 3) Guarda. Si un vendedor debe tener otro objetivo, usa ", React.createElement("span", {
+  }, "Cómo se usa:"), " 1) Agrega las empresas. 2) Escribe el objetivo de cada una, en cajas o en kilos. 3) Guarda. Si un vendedor debe tener otro objetivo, usa ", React.createElement("span", {
     className: "font-black"
-  }, "Por vendedor"), "."), React.createElement("div", {
+  }, "Por vendedor"), " en la fila, o cambia arriba a la vista ", React.createElement("span", {
+    className: "font-black"
+  }, "Por vendedor"), " para ver todas sus empresas juntas."), React.createElement("div", {
     className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
   }, React.createElement("div", {
     className: "flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-slate-100"
@@ -10771,7 +11304,7 @@ const IncentivosAdminPanel = ({
     className: "font-black text-blue-900 text-base"
   }, "Empresas"), React.createElement("p", {
     className: "text-xs text-slate-500 font-medium mt-0.5"
-  }, "Un objetivo en cajas por empresa. Las empresas sin objetivo no se muestran a los vendedores.")), React.createElement("button", {
+  }, "Un objetivo por empresa, en cajas o en kilos. Las empresas sin objetivo no se muestran a los vendedores.")), React.createElement("button", {
     onClick: cargarTodasEmpresas,
     disabled: empresasQueFaltan.length === 0,
     className: "text-sm font-bold bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white disabled:opacity-40 disabled:hover:bg-blue-50 disabled:hover:text-blue-700 px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
@@ -10787,6 +11320,7 @@ const IncentivosAdminPanel = ({
     onToggle: id => setAbierto(abierto === id ? null : id),
     onChange: actualizar,
     onChangeVendedor: cambiarVendedor,
+    onChangeUnidadVendedor: cambiarUnidadVendedor,
     onRemove: quitar
   })), empresas.length === 0 && React.createElement("p", {
     className: "text-sm text-slate-400 font-medium text-center py-6"
@@ -10829,6 +11363,7 @@ const IncentivosAdminPanel = ({
     onToggle: id => setAbierto(abierto === id ? null : id),
     onChange: actualizar,
     onChangeVendedor: cambiarVendedor,
+    onChangeUnidadVendedor: cambiarUnidadVendedor,
     onRemove: quitar
   })), otros.length === 0 && React.createElement("p", {
     className: "text-sm text-slate-400 font-medium text-center py-6"
@@ -10864,19 +11399,151 @@ const IncentivosAdminPanel = ({
     value: v
   })))), React.createElement("div", null, React.createElement("label", {
     className: lblCls
-  }, "Objetivo (cajas)"), React.createElement("input", {
+  }, "Objetivo"), React.createElement("input", {
     type: "text",
     inputMode: "decimal",
     placeholder: "0",
     value: objetivoNuevo,
     onChange: e => setObjetivoNuevo(normalizarEntradaDecimal(e.target.value)),
     className: inputSel + ' w-28 text-right'
-  })), React.createElement("button", {
+  })), React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Unidad"), React.createElement("select", {
+    value: unidadNueva,
+    onChange: e => setUnidadNueva(e.target.value),
+    className: inputSel
+  }, INCENTIVO_UNIDADES.map(u => React.createElement("option", {
+    key: u.id,
+    value: u.id
+  }, u.label)))), React.createElement("button", {
     onClick: agregarOtro,
     className: "px-5 py-2.5 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors flex items-center gap-2 text-sm"
   }, React.createElement(Plus, {
     size: 16
-  }), " Agregar"))), React.createElement("div", {
+  }), " Agregar")))), modoCfg === 'vendedor' && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "bg-blue-50 border border-blue-100 rounded-2xl px-5 py-4 text-sm text-blue-900 font-medium"
+  }, React.createElement("span", {
+    className: "font-black"
+  }, "Cómo se usa:"), " 1) Elige un vendedor. 2) Escribe su objetivo en cada empresa o marca: en blanco usa el objetivo general y 0 significa que no le aplica. 3) Si su objetivo es en kilos (por ejemplo, food service), cámbialo a ", React.createElement("span", {
+    className: "font-black"
+  }, "Kilos"), " en esa fila. 4) Guarda."), !vendCfgObj ? React.createElement("div", {
+    className: "bg-white p-10 rounded-2xl shadow-sm border border-slate-100 text-center text-sm text-slate-400 font-medium"
+  }, "Elige un vendedor para ver todas sus empresas y ponerle sus objetivos.") : React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, React.createElement("div", {
+    className: "flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-slate-100"
+  }, React.createElement("div", null, React.createElement("h4", {
+    className: "font-black text-blue-900 text-base flex items-center gap-2"
+  }, React.createElement("span", {
+    className: "font-mono text-slate-400"
+  }, vendCfgObj.id), " ", vendCfgObj.nombre), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mt-0.5"
+  }, "Todas las empresas. ", propiosVend > 0 ? `${propiosVend} incentivo${propiosVend === 1 ? '' : 's'} con objetivo propio.` : 'Todavía no tiene objetivos propios.')), React.createElement("div", {
+    className: "relative w-full sm:w-64"
+  }, React.createElement(Search, {
+    className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400",
+    size: 16
+  }), React.createElement("input", {
+    type: "text",
+    placeholder: "Buscar empresa…",
+    value: busquedaVend,
+    onChange: e => setBusquedaVend(e.target.value),
+    className: inputSel + ' w-full pl-9'
+  }))), React.createElement("div", {
+    className: "space-y-2"
+  }, empresasVendVisibles.map(f => React.createElement(IncentivoFilaVendedor, {
+    key: f.tipo + '|' + f.valor,
+    tipo: f.tipo,
+    valor: f.valor,
+    item: f.item,
+    vendedorId: vendCfgObj.id,
+    onTexto: (t, v, texto) => editarVendedor(t, v, vendCfgObj.id, {
+      texto
+    }),
+    onUnidad: (t, v, unidad) => editarVendedor(t, v, vendCfgObj.id, {
+      unidad
+    })
+  })), empresasVendVisibles.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-6"
+  }, filasVendedorCfg.empresas.length === 0 ? 'No hay empresas cargadas en las ventas.' : 'Ninguna empresa coincide con la búsqueda.'))), React.createElement("div", {
+    className: "bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+  }, React.createElement("div", {
+    className: "mb-4 pb-4 border-b border-slate-100"
+  }, React.createElement("h4", {
+    className: "font-black text-blue-900 text-base"
+  }, "Otras marcas / productos de este vendedor"), React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mt-0.5"
+  }, "Los incentivos que no son empresas. Agrega aquí una categoría para este vendedor, en cajas o en kilos.")), React.createElement("div", {
+    className: "space-y-2"
+  }, filasVendedorCfg.otros.map(f => React.createElement(IncentivoFilaVendedor, {
+    key: f.tipo + '|' + f.valor,
+    tipo: f.tipo,
+    valor: f.valor,
+    item: f.item,
+    vendedorId: vendCfgObj.id,
+    mostrarTipo: true,
+    onTexto: (t, v, texto) => editarVendedor(t, v, vendCfgObj.id, {
+      texto
+    }),
+    onUnidad: (t, v, unidad) => editarVendedor(t, v, vendCfgObj.id, {
+      unidad
+    })
+  })), filasVendedorCfg.otros.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-6"
+  }, "Todavía no hay otros incentivos. Agrégalos aquí abajo.")), React.createElement("div", {
+    className: "flex flex-wrap items-end gap-2 mt-4 pt-4 border-t border-slate-100"
+  }, React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Categoría"), React.createElement("select", {
+    value: tipoVend,
+    onChange: e => {
+      setTipoVend(e.target.value);
+      setValorVend('');
+    },
+    className: inputSel
+  }, INCENTIVO_TIPOS.filter(t => t.id !== 'empresa').map(t => React.createElement("option", {
+    key: t.id,
+    value: t.id
+  }, t.label)))), React.createElement("div", {
+    className: "flex-1 min-w-[220px]"
+  }, React.createElement("label", {
+    className: lblCls
+  }, "Nombre (escribe o elige)"), React.createElement("input", {
+    type: "text",
+    list: "dl-incentivo-vend",
+    placeholder: "Ej: nombre de la marca o del producto",
+    value: valorVend,
+    onChange: e => setValorVend(e.target.value),
+    className: inputSel + ' w-full'
+  }), React.createElement("datalist", {
+    id: "dl-incentivo-vend"
+  }, (conocidos[tipoVend] || []).map(v => React.createElement("option", {
+    key: v,
+    value: v
+  })))), React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Su objetivo"), React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    placeholder: "0",
+    value: objetivoVend,
+    onChange: e => setObjetivoVend(normalizarEntradaDecimal(e.target.value)),
+    className: inputSel + ' w-28 text-right'
+  })), React.createElement("div", null, React.createElement("label", {
+    className: lblCls
+  }, "Unidad"), React.createElement("select", {
+    value: unidadVend,
+    onChange: e => setUnidadVend(e.target.value),
+    className: inputSel
+  }, INCENTIVO_UNIDADES.map(u => React.createElement("option", {
+    key: u.id,
+    value: u.id
+  }, u.label)))), React.createElement("button", {
+    onClick: agregarDeVendedor,
+    className: "px-5 py-2.5 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors flex items-center gap-2 text-sm"
+  }, React.createElement(Plus, {
+    size: 16
+  }), " Agregar"))))), React.createElement("div", {
     className: "sticky bottom-4 z-10"
   }, React.createElement("div", {
     className: "bg-slate-900 text-white rounded-2xl shadow-xl px-5 py-3 flex flex-wrap items-center justify-between gap-3"
@@ -10909,6 +11576,19 @@ const IncentivosAdminPanel = ({
   }, "Todavía no hay incentivos guardados con objetivo. Configúralos y guarda para ver el avance.") : React.createElement(React.Fragment, null, React.createElement("div", {
     className: "flex flex-wrap items-end justify-between gap-3 mb-4 pb-4 border-b border-slate-100"
   }, React.createElement("div", {
+    className: "flex flex-wrap items-end gap-3"
+  }, React.createElement("div", {
+    className: "flex bg-slate-100 p-1 rounded-xl"
+  }, React.createElement("button", {
+    onClick: () => setModoAv('incentivo'),
+    className: segBtn(modoAv === 'incentivo')
+  }, "Por incentivo"), React.createElement("button", {
+    onClick: () => setModoAv('vendedor'),
+    className: segBtn(modoAv === 'vendedor')
+  }, "Por vendedor"), React.createElement("button", {
+    onClick: () => setModoAv('totales'),
+    className: segBtn(modoAv === 'totales')
+  }, "Totales")), modoAv === 'incentivo' && React.createElement("div", {
     className: "min-w-[240px]"
   }, React.createElement("label", {
     className: lblCls
@@ -10919,58 +11599,214 @@ const IncentivosAdminPanel = ({
   }, guardadas.map(i => React.createElement("option", {
     key: i.id,
     value: i.id
-  }, i.valor, " · ", incentivoTipoLabel(i.tipo))))), React.createElement("span", {
-    className: "bg-slate-100 text-slate-600 px-4 py-1.5 rounded-full text-xs font-bold"
-  }, "Mes en Curso: ", formatMonthStr(mesStr))), React.createElement("div", {
+  }, i.valor, " · ", incentivoTipoLabel(i.tipo))))), modoAv === 'vendedor' && React.createElement("div", {
+    className: "min-w-[240px]"
+  }, React.createElement("label", {
+    className: lblCls
+  }, "Vendedor (por ruta)"), React.createElement("select", {
+    value: vendAv ? vendAv.id : '',
+    onChange: e => setAvanceVend(e.target.value),
+    className: inputSel + ' w-full'
+  }, vendedores.map(v => React.createElement("option", {
+    key: v.id,
+    value: v.id
+  }, v.id, " · ", v.nombre))))), mesChip), modoAv === 'incentivo' && itemAvance && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "flex flex-wrap items-center justify-between gap-2 mb-3"
+  }, React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "Cuota de cada vendedor en ", React.createElement("span", {
+    className: "font-black text-slate-700"
+  }, itemAvance.valor), ", con el total abajo."), React.createElement("div", {
+    className: "flex items-center gap-1 text-xs font-bold"
+  }, React.createElement("span", {
+    className: "text-slate-400 mr-1"
+  }, "Ordenar:"), React.createElement("button", {
+    onClick: () => setOrdenAv('ruta'),
+    className: `px-2.5 py-1 rounded-lg ${ordenAv === 'ruta' ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`
+  }, "Ruta"), React.createElement("button", {
+    onClick: () => setOrdenAv('pct'),
+    className: `px-2.5 py-1 rounded-lg ${ordenAv === 'pct' ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`
+  }, "% de cumplimiento"))), React.createElement("div", {
     className: "overflow-x-auto border border-slate-100 rounded-xl"
   }, React.createElement("table", {
-    className: "w-full text-sm min-w-[620px]"
+    className: "w-full text-sm min-w-[720px]"
   }, React.createElement("thead", {
     className: "bg-slate-50 text-[10px] uppercase font-black text-slate-500 tracking-wider"
   }, React.createElement("tr", null, React.createElement("th", {
     className: "text-left px-4 py-3"
   }, "Vendedor"), React.createElement("th", {
-    className: "text-right px-3 py-3"
-  }, "Objetivo (cajas)"), React.createElement("th", {
-    className: "text-right px-3 py-3"
-  }, "Vendidas"), React.createElement("th", {
-    className: "text-right px-3 py-3"
+    className: "text-center px-3 py-3"
+  }, "Unidad"), React.createElement("th", {
+    className: thAv
+  }, "Objetivo"), React.createElement("th", {
+    className: thAv
+  }, "Vendido"), React.createElement("th", {
+    className: thAv
   }, "Faltan"), React.createElement("th", {
-    className: "text-left px-4 py-3 w-[30%]"
+    className: "text-left px-4 py-3 w-[28%]"
   }, "% de cumplimiento"))), React.createElement("tbody", {
     className: "divide-y divide-slate-100"
-  }, filasAvance.map(f => {
-    const c = colorIncentivo(f.pct || 0);
-    return React.createElement("tr", {
-      key: f.u.id,
-      className: f.pct === null ? 'opacity-50' : ''
-    }, React.createElement("td", {
-      className: "px-4 py-3 font-bold text-slate-800"
-    }, React.createElement("span", {
-      className: "font-mono text-slate-400 mr-1"
-    }, f.u.id), f.u.nombre), React.createElement("td", {
-      className: "px-3 py-3 text-right font-bold text-slate-600"
-    }, f.pct === null ? '—' : fmtCajas(f.objetivo)), React.createElement("td", {
-      className: "px-3 py-3 text-right font-black text-blue-900"
-    }, fmtCajas(f.cajas)), React.createElement("td", {
-      className: `px-3 py-3 text-right font-black ${f.pct === null ? 'text-slate-300' : f.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
-    }, f.pct === null ? '—' : fmtCajas(f.falta)), React.createElement("td", {
-      className: "px-4 py-3"
-    }, f.pct === null ? React.createElement("span", {
-      className: "text-xs font-bold text-slate-400"
-    }, "Sin objetivo") : React.createElement("div", {
-      className: "flex items-center gap-3"
-    }, React.createElement("div", {
-      className: "flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden"
-    }, React.createElement("div", {
-      className: `h-full rounded-full ${c.barra}`,
-      style: {
-        width: `${Math.min(f.pct, 100)}%`
-      }
-    })), React.createElement("span", {
-      className: `font-black text-sm w-16 text-right ${c.texto}`
-    }, f.pct.toFixed(1), "%"))));
-  })))))));
+  }, avPorIncentivo.filas.map(f => React.createElement("tr", {
+    key: f.u.id,
+    className: f.pct === null ? 'opacity-50' : ''
+  }, React.createElement("td", {
+    className: "px-4 py-3 font-bold text-slate-800"
+  }, React.createElement("span", {
+    className: "font-mono text-slate-400 mr-1"
+  }, f.u.id), f.u.nombre), React.createElement("td", {
+    className: "px-3 py-3 text-center"
+  }, f.pct === null ? '' : React.createElement(UnidadTag, {
+    u: f.unidad
+  })), React.createElement("td", {
+    className: "px-3 py-3 text-right font-bold text-slate-600"
+  }, f.pct === null ? '—' : fmtCant(f.objetivo)), React.createElement("td", {
+    className: "px-3 py-3 text-right font-black text-blue-900"
+  }, fmtCant(f.vendido)), React.createElement("td", {
+    className: `px-3 py-3 text-right font-black ${f.pct === null ? 'text-slate-300' : f.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+  }, f.pct === null ? '—' : fmtCant(f.falta)), React.createElement("td", {
+    className: "px-4 py-3"
+  }, f.pct === null ? React.createElement("span", {
+    className: "text-xs font-bold text-slate-400"
+  }, "Sin objetivo") : React.createElement(BarraPct, {
+    pct: f.pct
+  }))))), React.createElement("tfoot", {
+    className: "border-t-2 border-slate-200"
+  }, filasTotal(avPorIncentivo.totales, 'Total', false)))), notaFaltan, avPorIncentivo.sinObjetivoVendido > 0 && React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-500 mt-3"
+  }, "Además, los vendedores sin objetivo vendieron ", React.createElement("span", {
+    className: "font-black text-slate-700"
+  }, fmtCant(avPorIncentivo.sinObjetivoVendido)), " de ", itemAvance.valor, "; no cuentan en el total.")), modoAv === 'vendedor' && vendAv && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "flex flex-wrap items-center justify-between gap-2 mb-3"
+  }, React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "Cómo va ", React.createElement("span", {
+    className: "font-black text-slate-700"
+  }, vendAv.id, " · ", vendAv.nombre), " en cada empresa."), React.createElement("label", {
+    className: "flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: sinObjetivo,
+    onChange: e => setSinObjetivo(e.target.checked),
+    className: "w-4 h-4 accent-blue-600 cursor-pointer"
+  }), "Mostrar también las empresas sin objetivo (si vendió)")), [['Empresas', avPorVendedor.empresas, true], ['Otras marcas / productos', avPorVendedor.otros, false]].map(([titulo, filas, conTotal]) => filas.length > 0 && React.createElement("div", {
+    key: titulo,
+    className: "mb-5"
+  }, React.createElement("h4", {
+    className: "text-sm font-black text-slate-700 uppercase tracking-wider mb-2"
+  }, titulo), React.createElement("div", {
+    className: "overflow-x-auto border border-slate-100 rounded-xl"
+  }, React.createElement("table", {
+    className: "w-full text-sm min-w-[720px]"
+  }, React.createElement("thead", {
+    className: "bg-slate-50 text-[10px] uppercase font-black text-slate-500 tracking-wider"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "text-left px-4 py-3"
+  }, conTotal ? 'Empresa' : 'Marca / producto'), React.createElement("th", {
+    className: "text-center px-3 py-3"
+  }, "Unidad"), React.createElement("th", {
+    className: thAv
+  }, "Objetivo"), React.createElement("th", {
+    className: thAv
+  }, "Vendido"), React.createElement("th", {
+    className: thAv
+  }, "Faltan"), React.createElement("th", {
+    className: "text-left px-4 py-3 w-[28%]"
+  }, "% de cumplimiento"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, filas.map(f => React.createElement("tr", {
+    key: f.item.id,
+    className: f.pct === null ? 'opacity-50' : ''
+  }, React.createElement("td", {
+    className: "px-4 py-3 font-bold text-slate-800"
+  }, f.item.valor, !conTotal && React.createElement("span", {
+    className: "ml-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+  }, incentivoTipoLabel(f.item.tipo))), React.createElement("td", {
+    className: "px-3 py-3 text-center"
+  }, f.pct === null ? '' : React.createElement(UnidadTag, {
+    u: f.unidad
+  })), React.createElement("td", {
+    className: "px-3 py-3 text-right font-bold text-slate-600"
+  }, f.pct === null ? '—' : fmtCant(f.objetivo)), React.createElement("td", {
+    className: "px-3 py-3 text-right font-black text-blue-900"
+  }, fmtCant(f.vendido)), React.createElement("td", {
+    className: `px-3 py-3 text-right font-black ${f.pct === null ? 'text-slate-300' : f.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+  }, f.pct === null ? '—' : fmtCant(f.falta)), React.createElement("td", {
+    className: "px-4 py-3"
+  }, f.pct === null ? React.createElement("span", {
+    className: "text-xs font-bold text-slate-400"
+  }, "Sin objetivo") : React.createElement(BarraPct, {
+    pct: f.pct
+  }))))), conTotal && React.createElement("tfoot", {
+    className: "border-t-2 border-slate-200"
+  }, filasTotal(avPorVendedor.totales, 'Total empresas', false)))), conTotal && notaFaltan, !conTotal && React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-400 mt-2"
+  }, "Estas categorías no se suman: una marca o un producto puede estar dentro de una empresa."))), avPorVendedor.empresas.length === 0 && avPorVendedor.otros.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-8"
+  }, "Este vendedor no tiene objetivos guardados.")), modoAv === 'totales' && React.createElement(React.Fragment, null, React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium mb-3"
+  }, "Cada incentivo sumando a todos los vendedores que tienen objetivo. Toca un nombre para ver el detalle por vendedor."), [['Empresas', avTotales.empresas, true], ['Otras marcas / productos', avTotales.otros, false]].map(([titulo, lista, conTotal]) => lista.length > 0 && React.createElement("div", {
+    key: titulo,
+    className: "mb-5"
+  }, React.createElement("h4", {
+    className: "text-sm font-black text-slate-700 uppercase tracking-wider mb-2"
+  }, titulo), React.createElement("div", {
+    className: "overflow-x-auto border border-slate-100 rounded-xl"
+  }, React.createElement("table", {
+    className: "w-full text-sm min-w-[760px]"
+  }, React.createElement("thead", {
+    className: "bg-slate-50 text-[10px] uppercase font-black text-slate-500 tracking-wider"
+  }, React.createElement("tr", null, React.createElement("th", {
+    className: "text-left px-4 py-3"
+  }, conTotal ? 'Empresa' : 'Marca / producto'), React.createElement("th", {
+    className: "text-center px-3 py-3"
+  }, "Unidad"), React.createElement("th", {
+    className: thAv
+  }, "Vendedores"), React.createElement("th", {
+    className: thAv
+  }, "Objetivo total"), React.createElement("th", {
+    className: thAv
+  }, "Vendido"), React.createElement("th", {
+    className: thAv
+  }, "Faltan"), React.createElement("th", {
+    className: "text-left px-4 py-3 w-[26%]"
+  }, "% de cumplimiento"))), React.createElement("tbody", {
+    className: "divide-y divide-slate-100"
+  }, lista.flatMap(x => x.tot.map(t => React.createElement("tr", {
+    key: x.item.id + t.unidad
+  }, React.createElement("td", {
+    className: "px-4 py-3 font-bold text-slate-800"
+  }, React.createElement("button", {
+    onClick: () => {
+      setAvanceId(x.item.id);
+      setModoAv('incentivo');
+    },
+    className: "text-left hover:text-blue-700 hover:underline",
+    title: "Ver el detalle por vendedor"
+  }, x.item.valor), !conTotal && React.createElement("span", {
+    className: "ml-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide"
+  }, incentivoTipoLabel(x.item.tipo))), React.createElement("td", {
+    className: "px-3 py-3 text-center"
+  }, React.createElement(UnidadTag, {
+    u: t.unidad
+  })), React.createElement("td", {
+    className: "px-3 py-3 text-right font-bold text-slate-500"
+  }, t.n), React.createElement("td", {
+    className: "px-3 py-3 text-right font-bold text-slate-600"
+  }, fmtCant(t.objetivo)), React.createElement("td", {
+    className: "px-3 py-3 text-right font-black text-blue-900"
+  }, fmtCant(t.vendido)), React.createElement("td", {
+    className: `px-3 py-3 text-right font-black ${t.falta > 0 ? 'text-orange-600' : 'text-green-600'}`
+  }, fmtCant(t.falta)), React.createElement("td", {
+    className: "px-4 py-3"
+  }, React.createElement(BarraPct, {
+    pct: t.pct
+  })))))), conTotal && React.createElement("tfoot", {
+    className: "border-t-2 border-slate-200"
+  }, filasTotal(avTotales.totalEmpresas, 'Total empresas', true).map(el => el)))), conTotal && notaFaltan, !conTotal && React.createElement("p", {
+    className: "text-[11px] font-medium text-slate-400 mt-2"
+  }, "Estas categorías no se suman entre sí: una marca o un producto puede estar dentro de una empresa."))), avTotales.empresas.length === 0 && avTotales.otros.length === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-8"
+  }, "No hay objetivos guardados para totalizar.")))));
 };
 const VentasVendedorDashboard = ({
   userId,
