@@ -22,6 +22,9 @@ const CONGELADO = args.includes('--congelado');
 const BASE = ['normalizeId', 'parseNum', 'yieldToBrowser', 'mapGitHubSalesRow', 'buildVendorFilter', 'notaFechaVenta',
   'parseExcelRowsChunked', 'parseJsonSalesChunked', 'streamCsvSalesRows'];
 const EXTRA = String(opt('extra', '') || '').split(',').map(s => s.trim()).filter(Boolean);
+// Auxiliares del Paso 1 (resolución de columnas una vez por firma de cabeceras). Son OPCIONALES: la versión del 12-nov no
+// las tiene y no es un error que falten; si están en el index.html, se extraen junto con mapGitHubSalesRow.
+const OPCIONALES = ['_normalizarClave', '_ALIAS_VENTAS', '_ALIAS_VENTAS_NORM', '_columnasPorFirma', '_ultClaves', '_ultCols', '_columnasDe'];
 const NOMBRES = [...BASE, ...EXTRA];
 
 const buf = fs.readFileSync(SRC);
@@ -31,7 +34,7 @@ if (!m) { console.error('No encontré el bloque <script type="text/babel"> en ' 
 const jsx = m[1];
 
 const ast = babel.parseSync(jsx, { presets: [['@babel/preset-react', { runtime: 'classic' }]], filename: 'index.jsx', sourceType: 'module' });
-const quiero = new Set(NOMBRES);
+const quiero = new Set([...NOMBRES, ...OPCIONALES]);
 const trozos = new Map();
 for (const nodo of ast.program.body) {
   let nombre = null;

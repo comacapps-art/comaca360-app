@@ -12799,19 +12799,65 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             }
         };
 
+        // Paso 1 (velocidad de ventas): las columnas se resuelven UNA vez por "firma" de cabeceras y no en cada fila.
+        // Antes, getVal() recorría las claves de la fila y hacía normalize('NFD') + 2 regex por clave y por alias, unas 16
+        // veces por fila. El resultado es siempre el mismo mientras las cabeceras no cambien: en un CSV es una sola firma; en
+        // Excel puede haber varias porque SheetJS omite las celdas vacías. Misma regla que antes: gana el primer alias (en
+        // orden) cuya columna exista; si hay varias columnas equivalentes, la primera.
+        const _normalizarClave = (key) => String(key).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+        const _ALIAS_VENTAS = {
+            cliente: ['Cliente', 'Client', 'NombreCliente', 'RazonSocial'],
+            articulo: ['Articulo', 'Article', 'Producto', 'Descripcion', 'Item'],
+            fecha: ['Fecha', 'Date', 'Emision', 'Dia'],
+            mes: ['Mes', 'Month'],
+            ano: ['Año', 'Ano', 'Year', 'Ao', 'Aao'],
+            idCliente: ['IdCliente', 'CodigoCliente', 'CodCliente', 'Id Cliente', 'ID_Cliente'],
+            grupo: ['Grupo', 'Subgrupo', 'Linea', 'Marca'],
+            subgrupo: ['Subgrupo', 'Sub Grupo', 'SubGrupo', 'Sub-Grupo', 'SubLinea', 'Sub Linea'],
+            linea: ['Linea', 'Line'],
+            idVendedor: ['IdVendedor', 'CodigoVendedor', 'CodVendedor'],
+            vendedor: ['Vendedor', 'Venedor', 'NombreVendedor'],
+            supervisor: ['Supervisor', 'Gerente'],
+            tipoDoc: ['TipoDoc', 'TipoDocumento', 'Documento'],
+            numero: ['Numero', 'Factura', 'Nro'],
+            cajas: ['Cajas', 'Cj', 'Bultos', 'Caixes'],
+            unidades: ['Unidades', 'Und', 'Piezas', 'Unitats'],
+            monto: ['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import'],
+            kilos: ['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']
+        };
+        const _ALIAS_VENTAS_NORM = Object.fromEntries(Object.entries(_ALIAS_VENTAS).map(([campo, lista]) => [campo, lista.map(_normalizarClave)]));
+        const _columnasPorFirma = new Map();
+        let _ultClaves = [];
+        let _ultCols = null;
+        function _columnasDe(row) {
+            const claves = Object.keys(row);
+            // Atajo: en CSV todas las filas traen las mismas cabeceras; comparar con la fila anterior evita armar la firma.
+            if (_ultCols !== null && claves.length === _ultClaves.length) {
+                let igual = true;
+                for (let i = 0; i < claves.length; i++) { if (claves[i] !== _ultClaves[i]) { igual = false; break; } }
+                if (igual) return _ultCols;
+            }
+            const firma = claves.join('\u0001');
+            let cols = _columnasPorFirma.get(firma);
+            if (cols) { _ultClaves = claves; _ultCols = cols; return cols; }
+            const norm = claves.map(_normalizarClave);
+            cols = {};
+            for (const campo in _ALIAS_VENTAS_NORM) {
+                let encontrada;
+                for (const t of _ALIAS_VENTAS_NORM[campo]) { const i = norm.indexOf(t); if (i !== -1) { encontrada = claves[i]; break; } }
+                cols[campo] = encontrada;
+            }
+            if (_columnasPorFirma.size > 500) _columnasPorFirma.clear();
+            _columnasPorFirma.set(firma, cols);
+            _ultClaves = claves; _ultCols = cols;
+            return cols;
+        }
+
         function mapGitHubSalesRow(row, fileObj) {
-            const normalizeKey = (key) => String(key).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
-            const getVal = (keys) => {
-                const rowKeys = Object.keys(row);
-                for (let k of keys) {
-                    const targetKey = normalizeKey(k);
-                    const foundKey = rowKeys.find(rk => normalizeKey(rk) === targetKey);
-                    if (foundKey !== undefined) return row[foundKey];
-                }
-                return undefined;
-            };
-            const clienteVal = String(getVal(['Cliente', 'Client', 'NombreCliente', 'RazonSocial']) || '').trim().toUpperCase();
-            const articuloVal = String(getVal(['Articulo', 'Article', 'Producto', 'Descripcion', 'Item']) || '').trim().toUpperCase();
+            const cols = _columnasDe(row);
+            const g = (c) => (c === undefined ? undefined : row[c]);
+            const clienteVal = String(g(cols.cliente) || '').trim().toUpperCase();
+            const articuloVal = String(g(cols.articulo) || '').trim().toUpperCase();
 
             // Validar que los datos esenciales estén presentes (evitar filas vacías o basura)
             if (!clienteVal || !articuloVal) return null;
@@ -12819,7 +12865,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             // Quitar la restricción estricta de includes('TOTAL') pero evitar la fila de suma de totales exacta si ocurre
             if (clienteVal === 'TOTAL' || clienteVal === 'TOTAL GENERAL' || articuloVal === 'TOTAL' || articuloVal === 'TOTAL GENERAL') return null;
 
-            let fechaVal = getVal(['Fecha', 'Date', 'Emision', 'Dia']);
+            let fechaVal = g(cols.fecha);
             if (fechaVal) {
                 if (typeof fechaVal === 'string') {
                     let fStr = String(fechaVal).trim().split(' ')[0];
@@ -12851,10 +12897,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const dateObj = new Date(Math.round((fechaVal - 25569) * 86400 * 1000));
                     fechaVal = dateObj.toISOString().split('T')[0];
                 }
-            } else if (getVal(['Mes', 'Month'])) {
-                const mesNum = parseInt(String(getVal(['Mes', 'Month'])).replace(/[^0-9]/g, ''), 10) || 1;
+            } else if (g(cols.mes)) {
+                const mesNum = parseInt(String(g(cols.mes)).replace(/[^0-9]/g, ''), 10) || 1;
                 const mesStr = String(mesNum).padStart(2, '0');
-                let yearVal = getVal(['Año', 'Ano', 'Year', 'Ao', 'Aao']);
+                let yearVal = g(cols.ano);
                 let finalYear;
                 if (yearVal) {
                     finalYear = parseInt(String(yearVal).replace(/[^0-9]/g, ''), 10);
@@ -12871,23 +12917,23 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             return {
                 source: fileObj.type,
                 fecha: fechaVal,
-                idCliente: (() => { const rawId = String(getVal(['IdCliente', 'CodigoCliente', 'CodCliente', 'Id Cliente', 'ID_Cliente']) || 'S/N').trim(); return /^\d+$/.test(rawId) ? rawId.padStart(6, '0') : rawId; })(),
+                idCliente: (() => { const rawId = String(g(cols.idCliente) || 'S/N').trim(); return /^\d+$/.test(rawId) ? rawId.padStart(6, '0') : rawId; })(),
                 cliente: clienteVal,
-                grupo: String(getVal(['Grupo', 'Subgrupo', 'Linea', 'Marca']) || 'GENERAL').trim().toUpperCase(),
-                subgrupo: String(getVal(['Subgrupo', 'Sub Grupo', 'SubGrupo', 'Sub-Grupo', 'SubLinea', 'Sub Linea']) || '').trim().toUpperCase(),
+                grupo: String(g(cols.grupo) || 'GENERAL').trim().toUpperCase(),
+                subgrupo: String(g(cols.subgrupo) || '').trim().toUpperCase(),
                 // Línea de producto (ej. MAYONESA, TANG): columna propia que hoy solo trae el archivo
                 // del mes en curso. Vacía en los archivos que no la incluyen.
-                linea: String(getVal(['Linea', 'Line']) || '').trim().toUpperCase(),
-                idVendedor: String(getVal(['IdVendedor', 'CodigoVendedor', 'CodVendedor']) || 'S/N').trim(),
-                vendedor: String(getVal(['Vendedor', 'Venedor', 'NombreVendedor']) || 'Sin Asignar').trim().toUpperCase(),
-                supervisor: String(getVal(['Supervisor', 'Gerente']) || 'Sin Asignar').trim().toUpperCase(),
-                tipoDoc: String(getVal(['TipoDoc', 'TipoDocumento', 'Documento']) || 'FA').trim().toUpperCase(),
-                numero: String(getVal(['Numero', 'Factura', 'Nro']) || 'S/N').trim(),
+                linea: String(g(cols.linea) || '').trim().toUpperCase(),
+                idVendedor: String(g(cols.idVendedor) || 'S/N').trim(),
+                vendedor: String(g(cols.vendedor) || 'Sin Asignar').trim().toUpperCase(),
+                supervisor: String(g(cols.supervisor) || 'Sin Asignar').trim().toUpperCase(),
+                tipoDoc: String(g(cols.tipoDoc) || 'FA').trim().toUpperCase(),
+                numero: String(g(cols.numero) || 'S/N').trim(),
                 articulo: articuloVal,
-                cajas: parseNum(getVal(['Cajas', 'Cj', 'Bultos', 'Caixes'])),
-                unidades: parseNum(getVal(['Unidades', 'Und', 'Piezas', 'Unitats'])),
-                monto: parseNum(getVal(['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import'])),
-                kilos: parseNum(getVal(['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']))
+                cajas: parseNum(g(cols.cajas)),
+                unidades: parseNum(g(cols.unidades)),
+                monto: parseNum(g(cols.monto)),
+                kilos: parseNum(g(cols.kilos))
             };
         }
 
