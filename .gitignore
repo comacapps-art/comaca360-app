@@ -1,0 +1,23 @@
+node_modules/
+.claude/
+COTIZACION/
+PRESENTACION/
+.env*
+*.log
+Thumbs.db
+desktop.ini
+
+# Datos reales: NUNCA subir ventas, clientes ni cartera (este repositorio es público)
+*.csv
+*.xlsx
+*.xls
+datos_reales/
+
+# Copia aparte del paquete de entrega (tiene su propio git); no forma parte de este repositorio
+ENTREGA_PROGRAMADOR/
+
+# Archivo que las herramientas de medición vuelven a crear
+herramientas/medicion_ventas/actual_extraido.js
+
+# La guía técnica describe debilidades de seguridad: este repositorio es público, se entrega por privado
+DOCUMENTACION_TECNICA/

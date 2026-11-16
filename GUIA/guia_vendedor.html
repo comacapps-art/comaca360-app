@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Guía del vendedor · Incentivos y reporte de pagos · COMACA 360</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>/* Carta vertical. Colores de la app: azul 900/800/600 y naranja 500 (igual que la cotización). */
+@page{size:8.5in 11in;margin:0}
+:root{--blue9:#1e3a8a;--blue8:#1e40af;--blue6:#2563eb;--or:#f97316;--or6:#ea580c;--paper:#f8fafc;--ink:#1e293b;--muted:#64748b;--line:#e2e8f0;--chip:#e8efff;--good:#16a34a;--bad:#dc2626;--violet:#7c3aed}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html,body{margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans','Segoe UI',Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.page{width:816px;height:1056px;position:relative;overflow:hidden;page-break-after:always;break-after:page;background:#fff}
+.page:last-child{page-break-after:auto;break-after:auto}
+svg.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.logo{font-weight:800;font-size:21px;letter-spacing:-.01em;color:var(--blue9)}
+.logo b{color:var(--or)}
+code{font-family:Consolas,'Courier New',monospace;font-size:.92em;background:#eef2ff;color:var(--blue9);padding:1px 5px;border-radius:5px;font-weight:700}
+
+/* ---------- portada ---------- */
+.cover{background:linear-gradient(150deg,#1e3a8a 0%,#1e40af 52%,#c2410c 150%);color:#fff}
+.cv-top{position:absolute;left:56px;right:56px;top:46px;display:flex;justify-content:space-between;align-items:center}
+.cover .logo{color:#fff;font-size:28px}
+.cv-date{font-weight:600;font-size:14px;color:#c9d8ff;letter-spacing:.08em}
+.cv-main{position:absolute;left:56px;top:128px;width:680px}
+.eyebrow{margin:0;font-weight:700;font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#ffd2b0;display:flex;align-items:center;gap:12px}
+.eyebrow::before{content:"";width:34px;height:4px;border-radius:2px;background:var(--or)}
+.cover h1{margin:18px 0 0;font-size:56px;line-height:1.03;font-weight:800;letter-spacing:-.03em;text-wrap:balance}
+.cv-sub{margin:20px 0 0;font-size:18px;line-height:1.5;color:#dbe6ff;max-width:590px}
+.cv-cards{position:absolute;left:56px;right:56px;top:392px;display:flex;gap:18px;align-items:stretch}
+.pc{background:#fff;color:var(--ink);border-radius:22px;padding:24px 26px 22px;box-shadow:0 26px 50px -24px rgba(0,0,0,.55);position:relative;overflow:hidden;width:343px}
+.pc::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;background:var(--blue9)}
+.pc.main::before{background:var(--or)}
+.pc small{display:block;font-weight:800;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.pc h3{margin:6px 0 0;font-size:31px;line-height:1.05;font-weight:800;letter-spacing:-.02em;color:var(--blue9)}
+.pc p{margin:8px 0 0;font-size:14px;line-height:1.4;color:var(--muted);font-weight:600}
+.pc ul{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:9px}
+.pc li{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;line-height:1.38;font-weight:600}
+.pc li svg{width:18px;height:18px;color:var(--good);margin-top:1px;stroke-width:3}
+.cv-pay{position:absolute;left:56px;top:700px;display:flex;gap:10px;flex-wrap:wrap}
+.cv-pay span{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:600}
+.cv-pay svg{width:16px;height:16px}
+.cv-cap{position:absolute;left:56px;top:752px;margin:0;font-size:11.5px;color:#c9d8ff}
+.cv-shot{position:absolute;left:92px;top:790px;width:650px;border-radius:18px;overflow:hidden;box-shadow:0 40px 70px -20px rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.35);transform:rotate(-2.5deg);background:#fff}
+.cv-shot img{display:block;width:100%;height:auto}
+
+/* ---------- páginas interiores ---------- */
+.inner{background:#fff}
+.inner::before{content:"";position:absolute;right:-160px;top:-160px;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(37,99,235,.10),rgba(37,99,235,0) 70%)}
+.ph{position:absolute;left:56px;right:56px;top:34px;display:flex;justify-content:space-between;align-items:center}
+.ph .tag{font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pf{position:absolute;left:56px;right:56px;bottom:24px;display:flex;justify-content:space-between;font-size:10.5px;font-weight:600;color:var(--muted);border-top:1px solid var(--line);padding-top:9px}
+.body{position:absolute;left:56px;right:56px;top:78px;bottom:54px;overflow:hidden}
+.kicker{margin:0;font-weight:800;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--or6);display:flex;align-items:center;gap:10px}
+.kicker::before{content:"";width:26px;height:4px;border-radius:2px;background:var(--or)}
+h2{margin:7px 0 0;font-size:27px;line-height:1.1;font-weight:800;letter-spacing:-.02em;color:var(--blue9)}
+.lead{margin:7px 0 0;font-size:13px;line-height:1.5;color:var(--muted);max-width:690px}
+.lead b{color:var(--ink)}
+
+/* tabla de resumen */
+.tbl{width:100%;border-collapse:separate;border-spacing:0 6px;margin-top:8px}
+.tbl th{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 12px;font-weight:800}
+.tbl td{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 12px;font-size:12px;line-height:1.38;font-weight:600;vertical-align:middle}
+.tbl td:first-child{border-left:1px solid var(--line);border-radius:12px 0 0 12px}
+.tbl td:last-child{border-right:1px solid var(--line);border-radius:0 12px 12px 0}
+.who{display:inline-block;font-weight:800;font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:4px 9px;border-radius:999px;white-space:nowrap}
+.who.adm{background:var(--chip);color:var(--blue9)}
+.who.ven{background:#ffedd5;color:var(--or6)}
+.path{color:var(--muted);font-weight:600}
+.path b{color:var(--blue9)}
+.menus{display:grid;grid-template-columns:236px 236px 1fr;gap:18px;margin-top:12px;align-items:start}
+.mcol .mt{margin:0 0 8px;font-size:11.5px;font-weight:800;color:var(--blue9);display:flex;align-items:center;gap:7px}
+.mcol.side{padding-top:24px}
+
+/* figuras y globos */
+.shot{position:relative;border-radius:12px;box-shadow:0 12px 24px -16px rgba(30,58,138,.6);border:1px solid var(--line);background:#fff;max-width:100%}
+.shot img{display:block;width:100%;height:auto;border-radius:11px}
+.shot.phone{border-radius:22px;border:4px solid #0f172a;box-shadow:0 14px 26px -14px rgba(15,23,42,.7)}
+.shot.phone img{border-radius:17px}
+.pin{position:absolute;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:var(--or);color:#fff;font-weight:800;font-size:11.5px;line-height:18px;text-align:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(15,23,42,.4);z-index:3}
+.leg{list-style:none;margin:9px 0 0;padding:0;display:grid;gap:5px}
+.leg li{display:grid;grid-template-columns:18px 1fr;gap:7px;font-size:11px;line-height:1.38;color:#475569;font-weight:500}
+.leg li b{color:var(--ink)}
+.leg .k,.defs .k{width:18px;height:18px;border-radius:50%;background:var(--or);color:#fff;font-weight:800;font-size:10px;display:grid;place-items:center;margin-top:1px}
+
+/* pasos */
+.step{display:grid;grid-template-columns:var(--lw,176px) 1fr;gap:18px;margin-top:16px;align-items:start}
+.step.full{grid-template-columns:1fr;gap:10px}
+.st h3{margin:0;font-size:14.5px;font-weight:800;color:var(--blue9);display:flex;gap:8px;align-items:center;line-height:1.2}
+.st h3 small{font-size:11px;font-weight:700;color:var(--muted)}
+.n{flex:none;width:25px;height:25px;border-radius:50%;background:var(--blue9);color:#fff;font-weight:800;font-size:12.5px;display:grid;place-items:center}
+.st p{margin:7px 0 0;font-size:12px;line-height:1.5;color:#475569;font-weight:500}
+.st p b,.st b{color:var(--ink)}
+.sr{min-width:0}
+.ph1{display:flex;flex-direction:column;gap:8px;align-items:flex-start;margin-top:14px;font-size:10.5px;line-height:1.35;color:var(--muted);font-weight:600}
+.ph1 .shot{flex:none}
+.two{display:grid;grid-template-columns:var(--c1,236px) 1fr;gap:18px;align-items:start}
+.two2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+
+/* notas */
+.tip,.info{border-radius:14px;padding:10px 14px;font-size:11.8px;line-height:1.5;font-weight:500}
+.tip{background:#fff7ed;border:1px solid #fed7aa;border-left:6px solid var(--or);color:#7c2d12}
+.info{background:#f3f6ff;border:1px solid #dbe5ff;border-left:6px solid var(--blue6);color:#1e3a8a}
+.tip b,.info b{font-weight:800}
+.defs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.defs.three{grid-template-columns:repeat(3,1fr)}
+.defs>div{position:relative;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:11.2px;line-height:1.45;color:#475569;background:#fafbff;font-weight:500}
+.defs>div b{color:var(--blue9);display:flex;align-items:center;gap:5px;margin:0 0 5px;font-size:11.8px;line-height:1.25}
+.defs .k{flex:none;margin-top:0}
+.legrow{margin-top:12px;font-size:11.5px;color:#475569;display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-weight:500}
+.legrow span{display:inline-flex;align-items:center;gap:6px}
+.legrow b{color:var(--ink)}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block;flex:none}
+.dot.g{background:#22c55e}.dot.b{background:#3b82f6}.dot.o{background:#f97316}
+.cases{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-top:14px}
+.case{position:relative;border:1px solid var(--line);border-radius:14px;padding:12px 13px 12px 46px;font-size:11.2px;line-height:1.45;color:#475569;background:#fff;box-shadow:0 10px 20px -18px rgba(30,58,138,.7);font-weight:500}
+.case b{color:var(--blue9);font-size:12px}
+.cn{position:absolute;left:12px;top:12px;width:24px;height:24px;border-radius:50%;background:var(--or);color:#fff;font-weight:800;font-size:12px;display:grid;place-items:center}
+.box{border:1px solid var(--line);border-radius:16px;padding:13px 15px;background:#fff;box-shadow:0 10px 22px -18px rgba(30,58,138,.6)}
+.box h4{margin:0 0 6px;font-size:13.5px;font-weight:800;color:var(--blue9);display:flex;align-items:center;gap:8px}
+.box h4 svg{color:var(--or6)}
+.box p{margin:6px 0 0;font-size:11.5px;line-height:1.5;color:#475569;font-weight:500}
+.faq{margin-top:14px;border:1px solid var(--line);border-radius:16px;padding:12px 16px 6px;background:#fff}
+.faq h4{margin:0 0 4px;font-size:13.5px;font-weight:800;color:var(--blue9);display:flex;align-items:center;gap:8px}
+.faq h4 svg{color:var(--or6)}
+.qa{display:grid;grid-template-columns:230px 1fr;gap:14px;padding:8px 0;border-top:1px solid var(--line);font-size:11.6px;line-height:1.45}
+.qa:first-of-type{border-top:0}
+.qa b{color:var(--ink);font-weight:800}
+.qa span{color:#475569;font-weight:500}
+
+.cheat{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+.cheat .box{padding:12px 14px}
+.cheat ol{margin:8px 0 0;padding-left:19px;font-size:11.2px;line-height:1.5;color:#475569;font-weight:500;display:grid;gap:4px}
+.cheat ol li::marker{color:var(--or6);font-weight:800}
+.cheat ol b{color:var(--ink)}
+.box.fb p{margin-top:2px}
+
+/* ---------- guía del vendedor (teléfonos) ---------- */
+.phones{display:flex;gap:26px;justify-content:center;margin-top:16px;align-items:flex-start}
+.pcol{flex:none}
+.cap{margin-top:12px}
+.cap h4{margin:0;font-size:13.5px;line-height:1.25;font-weight:800;color:var(--blue9);display:flex;gap:8px;align-items:flex-start}
+.cap h4 .n{margin-top:-1px}
+.cap p{margin:6px 0 0;font-size:12px;line-height:1.5;color:#475569;font-weight:500}
+.cap p b{color:var(--ink)}
+.sh{margin:0 0 9px;font-size:14px;font-weight:800;color:var(--blue9)}
+.read{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.read li{border:1px solid var(--line);border-radius:12px;padding:8px 11px;font-size:11.8px;line-height:1.4;color:#475569;background:#fff;font-weight:500}
+.read li .t{display:block;color:var(--blue9);font-size:12.5px;font-weight:800;margin-bottom:1px}
+.read li b{color:var(--ink);font-weight:800}
+.vlegend{display:grid;gap:6px;margin:12px 0 0;font-size:11.8px;color:#475569;font-weight:500}
+.vlegend span{display:flex;gap:8px;align-items:center}
+.vlegend b{color:var(--ink)}
+.feat{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+.fcard{border:1px solid var(--line);border-radius:18px;padding:16px 18px;background:#fff;box-shadow:0 14px 28px -20px rgba(30,58,138,.65);position:relative;overflow:hidden}
+.fcard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:var(--or)}
+.fcard.b::before{background:var(--blue9)}
+.fcard .fi{width:42px;height:42px;border-radius:13px;background:var(--chip);color:var(--blue9);display:grid;place-items:center;margin-bottom:10px}
+.fcard.a .fi{background:#ffedd5;color:var(--or6)}
+.fcard h4{margin:0;font-size:17px;font-weight:800;color:var(--blue9)}
+.fcard p{margin:6px 0 0;font-size:12.5px;line-height:1.5;color:#475569;font-weight:500}
+.fcard .where{margin-top:10px;font-size:11.8px;font-weight:700;color:var(--blue9);background:#f3f6ff;border-radius:10px;padding:8px 11px;line-height:1.4}
+.where b{color:var(--or6)}
+.cv-phones{position:absolute;left:0;right:0;top:782px;height:274px;overflow:hidden}
+.cv-phones .pp{position:absolute}
+.cv-phones .shot.phone{border:5px solid #0b1220;border-radius:30px;box-shadow:0 34px 60px -22px rgba(0,0,0,.75)}
+.cv-phones .shot.phone img{border-radius:24px}
+.estados{display:grid;gap:8px;margin-top:2px}
+.est{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:8px 11px;font-size:11.8px;line-height:1.4;color:#475569;background:#fff;font-weight:500}
+.est i{flex:none;margin-top:3px;width:11px;height:11px;border-radius:50%}
+.est b{color:var(--ink)}
+.i-y{background:#eab308}.i-g{background:#22c55e}.i-r{background:#ef4444}
+.sidecol{min-width:0}
+.sidecol .tip,.sidecol .info{margin-top:10px;font-size:11.4px}
+
+.bk{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--or);color:#fff;font-style:normal;font-weight:800;font-size:9px;margin:0 2px;vertical-align:1px;line-height:1}
+.tips3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.tips4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.tcard{border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:11.6px;line-height:1.45;color:#475569;background:#fff;font-weight:500}
+.tcard .t{display:block;color:var(--blue9);font-weight:800;font-size:12.5px;margin-bottom:2px}
+.tcard b{color:var(--ink);font-weight:800}
+.strip{margin-top:16px;border:1px solid #dbe5ff;background:#f3f6ff;border-radius:16px;padding:12px 14px 14px}
+.strip .sh{margin-bottom:10px}
+.steps7{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.steps7>div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 8px 9px;font-size:10.8px;line-height:1.35;color:#475569;font-weight:500;text-align:center}
+.steps7 .n{margin:0 auto 6px}
+.steps7 b{color:var(--ink);font-weight:800}
+.ex{border:1px dashed #bfd0ff;background:#fafcff;border-radius:14px;padding:10px 14px;font-size:11.8px;line-height:1.5;color:#475569;font-weight:500}
+.ex b{color:var(--blue9)}
+</style></head>
+<body><svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-dollar" viewBox="0 0 24 24"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></symbol><symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol><symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol><symbol id="i-file" viewBox="0 0 24 24"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></symbol><symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></symbol><symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol><symbol id="i-list" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></symbol><symbol id="i-phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" x2="12.01" y1="18" y2="18"/></symbol><symbol id="i-award" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></symbol><symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol></svg>
+<section class="page cover">
+  <div class="cv-top"><div class="logo">COMACA <b>360</b></div><div class="cv-date">NOVIEMBRE 2026</div></div>
+  <div class="cv-main">
+    <p class="eyebrow">Guía del vendedor</p>
+    <h1>Tus incentivos y tus pagos, desde el teléfono</h1>
+    <p class="cv-sub">Lo básico, paso a paso: cómo ver tus incentivos y cómo reportar un pago con varios pagos, varios clientes, retenciones y fotos.</p>
+  </div>
+  <div class="cv-cards">
+    <div class="pc main">
+      <small>Novedad 1</small><h3>Tus incentivos</h3>
+      <p>Mira cuántas cajas llevas y cuántas te faltan.</p>
+      <ul>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Toca <b>Mes</b> y baja un poco</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Tu porcentaje y una barra de color</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Se actualiza con tus ventas del mes</span></li>
+      </ul>
+    </div>
+    <div class="pc side">
+      <small>Novedad 2</small><h3>Reportar un pago</h3>
+      <p>Todo lo que el cliente pagó, en un solo recibo.</p>
+      <ul>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Varios pagos para una misma factura</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Facturas de varios clientes</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Retenciones y fotos del pago</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="cv-pay"><span><svg class="ic" viewBox="0 0 24 24"><use href="#i-phone"/></svg> Hecha para el teléfono</span><span><svg class="ic" viewBox="0 0 24 24"><use href="#i-list"/></svg> Paso a paso</span></div>
+  <p class="cv-cap">Las capturas usan datos de demostración (clientes, ventas y cifras ficticias).</p>
+  <div class="cv-phones">
+    <div class="pp" style="left:150px;top:28px;transform:rotate(-4deg)"><div class="shot phone " style="width:232px"><img src="img/ph_inc_a.jpg" width="232" height="502" alt=""></div></div>
+    <div class="pp" style="left:410px;top:56px;transform:rotate(3.5deg)"><div class="shot phone " style="width:232px"><img src="img/ph_r4.jpg" width="232" height="502" alt=""></div></div>
+  </div>
+</section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Lo nuevo</span></div><div class="body"><p class="kicker">Lo nuevo</p><h2>Dos cosas nuevas en tu app</h2><p class="lead">Entras como siempre, con tu usuario. Todo se hace tocando la pantalla de tu teléfono.</p>
+<div class="feat">
+  <div class="fcard a"><div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-award"/></svg></div><h4>Tus incentivos</h4><p>Mira cuántas cajas llevas vendidas, cuántas te faltan y tu porcentaje de cumplimiento.</p><div class="where">Dónde: pestaña <b>Mes</b> → baja hasta la tarjeta <b>Incentivos</b>.</div></div>
+  <div class="fcard b"><div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-dollar"/></svg></div><h4>Reportar un pago</h4><p>Reporta todo lo que el cliente pagó en un solo recibo: varios pagos, facturas de varios clientes, retenciones y fotos.</p><div class="where">Dónde: pestaña <b>Rep.Pagos</b>.</div></div>
+</div>
+<div class="two" style="margin-top:20px;--c1:230px">
+  <div><div class="shot phone " style="width:230px"><img src="img/ph_menu.jpg" width="230" height="498" alt=""><span class="pin" style="left:calc(6.06% + 0px);top:calc(7.11% + -5px)">A</span><span class="pin" style="left:calc(68.96% + 0px);top:calc(7.11% + -5px)">B</span></div></div>
+  <div class="sidecol">
+    <h3 class="sh">Cómo moverte por la app</h3>
+    <ul class="read"><li><span class="t">A · Mes</span>Aquí están tus indicadores de siempre y, más abajo, la tarjeta <b>Incentivos</b></li><li><span class="t">B · Rep.Pagos</span>Aquí reportas un pago y ves tu historial</li><li><span class="t">Barra de arriba</span>Toca una pestaña para cambiar de pantalla. Si no ves alguna, desliza la barra hacia un lado</li></ul>
+    <div class="info"><b>En computador</b><br>El menú está a la izquierda: <b>Indicadores (mes)</b> y <b>Reportar pagos</b>.</div>
+    <div class="tip"><b>Antes de reportar un pago, ten a la mano:</b> el comprobante del pago (banco, referencia, fecha y monto) y, si hubo retención, su comprobante.</div>
+    <div class="info" style="margin-top:10px"><b>Nada de lo que ya usabas cambió.</b> Estas dos cosas son nuevas.</div>
+  </div>
+</div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 2</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Tus incentivos</span></div><div class="body"><p class="kicker">Tus incentivos</p><h2>Cuánto llevas y cuánto te falta</h2><p class="lead">En la pestaña <b>Mes</b>, baja un poco: después de los indicadores está la tarjeta <b>Incentivos</b>. Cada empresa, marca o producto tiene su propio objetivo en cajas.</p>
+<div class="phones" style="gap:40px">
+  <div class="pcol" style="width:214px"><div class="shot phone " style="width:214px"><img src="img/ph_inc_a.jpg" width="214" height="463" alt=""><span class="pin" style="left:calc(94.61% + -8px);top:calc(4.86% + 0px)">A</span><span class="pin" style="left:calc(75.30% + -8px);top:calc(26.54% + -4px)">B</span><span class="pin" style="left:calc(9.23% + -12px);top:calc(31.63% + 0px)">C</span><span class="pin" style="left:calc(9.23% + -6px);top:calc(38.27% + 14px)">D</span></div><div class="cap"><h4>Tus empresas</h4><p><i class="bk">A</i> la tarjeta Incentivos. <i class="bk">B</i> tu porcentaje. <i class="bk">C</i> la barra de color. <i class="bk">D</i> objetivo, vendidas y cuántas te faltan.</p></div></div>
+  <div class="pcol" style="width:214px"><div class="shot phone " style="width:214px"><img src="img/ph_inc_b.jpg" width="214" height="463" alt=""><span class="pin" style="left:calc(94.61% + -8px);top:calc(2.13% + 0px)">A</span><span class="pin" style="left:calc(27.37% + 14px);top:calc(33.83% + 0px)">B</span><span class="pin" style="left:calc(5.38% + -8px);top:calc(66.35% + -10px)">C</span></div><div class="cap"><h4>Otras marcas y productos</h4><p><i class="bk">A</i> aquí van las marcas o productos con objetivo. <i class="bk">B</i> si llegaste, sale <b>¡Cumplido!</b>. <i class="bk">C</i> los colores.</p></div></div>
+</div>
+<div class="tips4"><div class="tcard"><span class="t">Objetivo</span>Las cajas que debes vender este mes.</div><div class="tcard"><span class="t">Vendidas</span>Las que llevas hasta hoy.</div><div class="tcard"><span class="t">Te faltan</span>Cuántas faltan para llegar al objetivo.</div><div class="tcard"><span class="t">Porcentaje</span>Cuánto del objetivo ya vendiste. La barra se llena hasta el 100 %.</div></div>
+<div class="legrow" style="margin-top:12px"><span><i class="dot g"></i><b>Verde</b>: cumplido (¡Cumplido!)</span><span><i class="dot b"></i><b>Azul</b>: ya llevas la mitad o más</span><span><i class="dot o"></i><b>Naranja</b>: menos de la mitad</span></div>
+<div class="two2">
+  <div class="ex"><b>Ejemplo:</b> objetivo 250, llevas vendidas 97,5. Te faltan 152,5 cajas y vas en 39 % (naranja).</div>
+  <div class="tip"><b>¿No ves la tarjeta?</b> Tu administrador todavía no puso un objetivo para ti. Cuando lo guarde, aparece sola.</div>
+</div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 3</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Reportar un pago</span></div><div class="body"><p class="kicker">Reportar un pago</p><h2>Pasos 1 y 2: el cliente y sus facturas</h2><p class="lead">Toca <b>Rep.Pagos</b> en la barra de arriba. Estás en la pestaña <b>Reportar Pago</b>.</p>
+<div class="phones">
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_r1.jpg" width="210" height="454" alt=""><span class="pin" style="left:calc(6.41% + -2px);top:calc(15.17% + -8px)">A</span><span class="pin" style="left:calc(10.51% + -8px);top:calc(55.63% + -6px)">B</span><span class="pin" style="left:calc(10.77% + -8px);top:calc(61.91% + -4px)">C</span></div><div class="cap"><h4><span class="n">1</span>Busca al cliente</h4><p>Escribe el <b>nombre o el código</b> y toca al cliente de la lista. <i class="bk">A</i> pestaña Reportar Pago. <i class="bk">B</i> buscador. <i class="bk">C</i> el cliente.</p></div></div>
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_r2.jpg" width="210" height="454" alt=""><span class="pin" style="left:calc(15.13% + -14px);top:calc(12.09% + 0px)">A</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(24.08% + 0px)">B</span></div><div class="cap"><h4><span class="n">2</span>Marca las facturas</h4><p>Toca las facturas que paga este recibo <i class="bk">B</i>. Si falta una, escribe su número en <b>Otra factura o nota</b> y toca <b>Agregar</b>.</p></div></div>
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_cli2.jpg" width="210" height="454" alt=""><span class="pin" style="left:calc(15.13% + -14px);top:calc(3.56% + 0px)">A</span><span class="pin" style="left:calc(76.67% + -14px);top:calc(4.54% + 0px)">B</span><span class="pin" style="left:calc(10.51% + -8px);top:calc(47.51% + -8px)">C</span></div><div class="cap"><h4><span class="n">+</span>¿Pagó por otro cliente?</h4><p>Toca <b>Agregar otro cliente a este recibo</b> <i class="bk">C</i> y marca sus facturas. Con la <b>X</b> <i class="bk">B</i> quitas un cliente.</p></div></div>
+</div>
+<div class="tip" style="margin-top:20px"><b>Un solo recibo, varios clientes:</b> si el cliente pagó con un mismo depósito facturas de más de un cliente, no hace falta hacer varios reportes. Agrega a cada cliente al mismo recibo.</div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 4</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Reportar un pago</span></div><div class="body"><p class="kicker">Reportar un pago</p><h2>Pasos 3 y 4: los pagos</h2><p class="lead">Un recibo puede traer <b>uno o varios pagos</b>: por ejemplo, dos transferencias de bancos distintos.</p>
+<div class="phones" style="gap:40px">
+  <div class="pcol" style="width:236px"><div class="shot phone " style="width:236px"><img src="img/ph_r3.jpg" width="236" height="511" alt=""><span class="pin" style="left:calc(15.13% + -14px);top:calc(20.49% + 0px)">A</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(30.34% + 0px)">B</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(40.23% + 0px)">C</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(50.11% + 0px)">D</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(59.89% + 0px)">E</span></div><div class="cap"><h4><span class="n">3</span>Escribe el pago</h4><p>Elige el <b>banco</b> <i class="bk">A</i> y escribe la <b>referencia</b> <i class="bk">B</i>, la <b>fecha</b> <i class="bk">C</i> y el <b>monto en Bs</b> <i class="bk">D</i>. La <b>tasa del día</b> <i class="bk">E</i> se llena sola.</p></div></div>
+  <div class="pcol" style="width:236px"><div class="shot phone " style="width:236px"><img src="img/ph_r4.jpg" width="236" height="511" alt=""><span class="pin" style="left:calc(15.13% + -14px);top:calc(3.73% + 0px)">A</span><span class="pin" style="left:calc(71.11% + -14px);top:calc(3.73% + 0px)">B</span><span class="pin" style="left:calc(10.51% + -8px);top:calc(69.43% + -8px)">C</span><span class="pin" style="left:calc(14.62% + -10px);top:calc(79.14% + 0px)">D</span></div><div class="cap"><h4><span class="n">4</span>¿Más de un pago?</h4><p>Toca <b>Agregar otro pago a este recibo</b> <i class="bk">C</i> y llena el siguiente <i class="bk">A</i>. Abajo ves el <b>total</b> <i class="bk">D</i>. Con <b>Quitar</b> <i class="bk">B</i> sacas un pago.</p></div></div>
+</div>
+<div class="tips3"><div class="tcard"><span class="t">La tasa del día</span>Se llena sola con la fecha del pago. Puedes corregirla. Si no la tienes, déjala vacía.</div><div class="tcard"><span class="t">El monto va en Bs</span>Escríbelo tal como sale en el comprobante del banco.</div><div class="tcard"><span class="t">Obligatorio en cada pago</span>Banco, referencia, fecha y monto. Si falta algo, la app te dice qué es antes de enviar.</div></div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 5</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Reportar un pago</span></div><div class="body"><p class="kicker">Reportar un pago</p><h2>Pasos 5, 6 y 7: retención, fotos y envío</h2><p class="lead">La retención y las fotos son opcionales. Si no las tienes, ve directo al resumen.</p>
+<div class="phones" style="gap:40px">
+  <div class="pcol" style="width:236px"><div class="shot phone " style="width:236px"><img src="img/ph_r5.jpg" width="236" height="511" alt=""><span class="pin" style="left:calc(15.13% + -14px);top:calc(20.49% + 0px)">A</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(50.11% + 0px)">B</span><span class="pin" style="left:calc(15.13% + -14px);top:calc(61.20% + 0px)">C</span><span class="pin" style="left:calc(10.51% + -4px);top:calc(80.03% + 0px)">D</span></div><div class="cap"><h4><span class="n">5</span>Retención (si hay)</h4><p>Toca <b>Agregar una retención</b> <i class="bk">D</i>. Elige el tipo (IVA, ISLR…) <i class="bk">A</i>, escribe el monto <i class="bk">B</i> y adjunta su comprobante <i class="bk">C</i>.</p></div></div>
+  <div class="pcol" style="width:236px"><div class="shot phone " style="width:236px"><img src="img/ph_r7.jpg" width="236" height="511" alt=""><span class="pin" style="left:calc(10.51% + -4px);top:calc(14.63% + 0px)">A</span><span class="pin" style="left:calc(10.51% + -4px);top:calc(30.87% + 0px)">B</span><span class="pin" style="left:calc(10.51% + -4px);top:calc(50.00% + 0px)">C</span><span class="pin" style="left:calc(10.51% + -4px);top:calc(58.29% + -6px)">D</span><span class="pin" style="left:calc(38.57% + -6px);top:calc(89.45% + -8px)">E</span></div><div class="cap"><h4><span class="n">6-7</span>Fotos, resumen y envío</h4><p>Adjunta las <b>fotos o el PDF</b> del pago <i class="bk">A</i> <i class="bk">B</i>. Escribe una observación si hace falta <i class="bk">C</i>. Revisa el <b>resumen</b> <i class="bk">D</i> y toca <b>Reportar Pago</b> <i class="bk">E</i>.</p></div></div>
+</div>
+<div class="tips3"><div class="tcard"><span class="t">La retención</span>No se suma a lo que pagó el cliente: se anota aparte para el administrador. Puedes reportar un recibo con solo la retención.</div><div class="tcard"><span class="t">Fotos y PDF</span>Hasta 8 archivos por reporte (cuentan también los de las retenciones). Las fotos se reducen solas; un PDF puede pesar hasta 600 KB.</div><div class="tcard"><span class="t">Limpiar</span>Borra todo el formulario para empezar de nuevo.</div></div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 6</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Después de enviar</span></div><div class="body"><p class="kicker">Después de enviar</p><h2>Tu reporte ya está con el administrador</h2><p class="lead">Queda <b>Pendiente</b> hasta que lo revise. Todo lo que reportaste está en la pestaña <b>Mi Historial</b>.</p>
+<div class="phones">
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_ok.jpg" width="210" height="454" alt=""></div><div class="cap"><h4>Aviso de enviado</h4><p>Cuando sale <b>Pago reportado</b>, ya llegó a Administración. Toca <b>Entendido</b>.</p></div></div>
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_h1.jpg" width="210" height="454" alt=""><span class="pin" style="left:calc(51.80% + -4px);top:calc(15.17% + -8px)">A</span><span class="pin" style="left:calc(4.10% + -6px);top:calc(24.76% + -8px)">B</span><span class="pin" style="left:calc(8.46% + -12px);top:calc(60.20% + 0px)">C</span></div><div class="cap"><h4>Mi Historial</h4><p><i class="bk">A</i> pestaña Mi Historial. <i class="bk">B</i> cuántos tienes pendientes, procesados y rechazados. <i class="bk">C</i> el estado de cada reporte.</p></div></div>
+  <div class="pcol" style="width:210px"><div class="shot phone " style="width:210px"><img src="img/ph_h2.jpg" width="210" height="454" alt=""><span class="pin" style="left:calc(8.46% + -8px);top:calc(22.39% + -6px)">A</span><span class="pin" style="left:calc(8.46% + -8px);top:calc(40.40% + -6px)">B</span><span class="pin" style="left:calc(8.46% + -8px);top:calc(51.07% + -6px)">C</span></div><div class="cap"><h4>El detalle de tu recibo</h4><p><i class="bk">A</i> cada pago con su banco y monto. <i class="bk">B</i> las retenciones. <i class="bk">C</i> <b>Ver soportes</b> abre tus fotos y PDF.</p></div></div>
+</div>
+<div class="two2" style="margin-top:18px">
+  <div class="tip"><b>Si la señal es débil</b> puede salir «Guardado, enviando…». <b>No lo vuelvas a reportar:</b> deja la app abierta con datos o wifi hasta que se envíe. Lo verás en tu historial cuando esté confirmado.</div>
+  <div class="info"><b>Si lo rechazan</b> verás el motivo dentro de la tarjeta. Corrige lo que haga falta y reporta el pago de nuevo: un reporte ya enviado no se edita.</div>
+</div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 7</span></div></section>
+<section class="page inner"><div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag">Para terminar</span></div><div class="body"><p class="kicker">Para terminar</p><h2>Soportes, estados y preguntas frecuentes</h2>
+<div class="two" style="margin-top:14px;--c1:230px">
+  <div><div class="shot phone " style="width:230px"><img src="img/ph_s1.jpg" width="230" height="498" alt=""><span class="pin" style="left:calc(8.21% + -10px);top:calc(18.01% + 0px)">A</span><span class="pin" style="left:calc(81.67% + -14px);top:calc(57.08% + 0px)">B</span><span class="pin" style="left:calc(82.56% + -14px);top:calc(10.71% + 0px)">C</span></div>
+    <div class="cap"><h4>Ver soportes</h4><p><i class="bk">A</i> las fotos y PDF de tus pagos. <i class="bk">B</i> toca <b>Abrir</b> (o la imagen) para verla grande. <i class="bk">C</i> toca la <b>X</b> para cerrar.</p></div></div>
+  <div class="sidecol">
+    <h3 class="sh">Estados de tu reporte</h3>
+    <div class="estados">
+      <div class="est"><i class="i-y"></i><span><b>Pendiente</b>: el administrador todavía no lo revisa.</span></div>
+      <div class="est"><i class="i-g"></i><span><b>Procesado</b>: ya fue aplicado.</span></div>
+      <div class="est"><i class="i-r"></i><span><b>Rechazado</b>: verás el motivo en la tarjeta. Corrige y reporta el pago de nuevo.</span></div>
+    </div>
+    <div class="faq" style="margin-top:12px;padding:10px 14px 4px">
+      <h4><svg class="ic" viewBox="0 0 24 24"><use href="#i-help"/></svg> Preguntas frecuentes</h4>
+      <div class="qa" style="grid-template-columns:1fr;gap:2px"><b>No veo la tarjeta Incentivos.</b><span>El administrador aún no puso un objetivo para ti.</span></div>
+      <div class="qa" style="grid-template-columns:1fr;gap:2px"><b>Me equivoqué en un pago ya enviado.</b><span>No se puede editar. Si lo rechazan, verás el motivo y lo reportas de nuevo.</span></div>
+      <div class="qa" style="grid-template-columns:1fr;gap:2px"><b>No tengo la tasa del día.</b><span>Déjala vacía: el pago se registra en bolívares y queda marcado «sin tasa».</span></div>
+      <div class="qa" style="grid-template-columns:1fr;gap:2px"><b>No me deja adjuntar un archivo.</b><span>Solo fotos (JPG, PNG) o PDF de hasta 600 KB; máximo 8 archivos. Si el PDF pesa más, toma una foto del documento.</span></div>
+      <div class="qa" style="grid-template-columns:1fr;gap:2px"><b>Salió «Guardado, enviando…».</b><span>No lo repitas: deja la app abierta con datos o wifi hasta que se envíe.</span></div>
+    </div>
+  </div>
+</div>
+<div class="strip"><h3 class="sh">Reportar un pago en 7 pasos</h3><div class="steps7">
+  <div><span class="n">1</span>Toca <b>Rep.Pagos</b> y busca al cliente</div>
+  <div><span class="n">2</span>Marca sus <b>facturas</b></div>
+  <div><span class="n">3</span>Escribe el <b>pago</b></div>
+  <div><span class="n">4</span>Agrega <b>otro pago</b> (si hay)</div>
+  <div><span class="n">5</span>Registra la <b>retención</b> (si hay)</div>
+  <div><span class="n">6</span>Adjunta <b>fotos o PDF</b></div>
+  <div><span class="n">7</span>Toca <b>Reportar Pago</b></div>
+</div></div></div><div class="pf"><span>Guía del vendedor · COMACA 360</span><span>Página 8</span></div></section>
+</body></html>

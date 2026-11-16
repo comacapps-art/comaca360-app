@@ -1,0 +1,20 @@
+{
+  "name": "comaca360-fuente",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Código fuente de COMACA 360 (versión base del 12-nov-2026) y herramientas para medir la carga de ventas",
+  "engines": {
+    "node": "^22.18.0 || >=24.11.0"
+  },
+  "scripts": {
+    "check": "node check-syntax.js",
+    "build": "node build.js",
+    "medicion:datos": "node herramientas/medicion_ventas/gen_csv_sintetico.js 150000 herramientas/medicion_ventas/ventas_sint.csv",
+    "medicion:bench": "node --expose-gc herramientas/medicion_ventas/bench.js herramientas/medicion_ventas/ventas_sint.csv",
+    "medicion:paridad": "node herramientas/medicion_ventas/paridad.js"
+  },
+  "devDependencies": {
+    "@babel/core": "8.0.1",
+    "@babel/preset-react": "8.0.1"
+  }
+}
