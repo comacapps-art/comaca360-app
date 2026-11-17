@@ -12972,6 +12972,61 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             return '';
         };
 
+        // Archivos que casi no cambian (el del año actual: ~150 MB, se actualiza una vez al mes): no hace falta volver a
+        // bajarlos en cada sincronización. Se le pregunta a GitHub cuánto pesa el archivo (petición HEAD, sin descargarlo) y,
+        // si pesa lo mismo que la última vez que se bajó y las filas guardadas en este equipo siguen ahí, se reutilizan. Ante
+        // la menor duda (sin respuesta, sin tamaño, otro usuario o enlace, copia vieja, "Sincronizar ahora") se baja de nuevo.
+        const SYNC_ARCHIVO_PREFIX = 'githubArchivoSync_';
+        const SYNC_ARCHIVO_VERSION = 1; // subir este número si cambia la forma en que se leen las filas
+        const SYNC_ARCHIVO_MAX_DIAS = 7; // aunque no cambie, se vuelve a bajar al menos una vez por semana
+        const _leerFirmaArchivo = (userId, tipo) => {
+            try {
+                const raw = localStorage.getItem(SYNC_ARCHIVO_PREFIX + userId + '_' + tipo);
+                const firma = raw ? JSON.parse(raw) : null;
+                return firma && typeof firma === 'object' ? firma : null;
+            } catch (e) { return null; }
+        };
+        const _guardarFirmaArchivo = (userId, tipo, firma) => {
+            try { localStorage.setItem(SYNC_ARCHIVO_PREFIX + userId + '_' + tipo, JSON.stringify(firma)); } catch (e) { console.warn(e); }
+        };
+        // Enlace "raw" de GitHub a partir del que se pegó en la configuración (blob/raw -> raw.githubusercontent.com).
+        function _normalizarUrlVentas(url) {
+            let rawUrl = String(url).trim();
+            if (rawUrl.includes('github.com')) {
+                if (rawUrl.includes('/blob/')) {
+                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+                } else if (rawUrl.includes('/raw/')) {
+                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/');
+                }
+            }
+            return rawUrl;
+        }
+        // Tamaño del archivo en bytes según el servidor (cabecera Content-Length de una petición HEAD), o null si no se pudo
+        // saber: sin respuesta, error, sin cabecera o demasiado lento.
+        async function _longitudRemota(url, esperaMs) {
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const reloj = ctrl ? setTimeout(() => ctrl.abort(), esperaMs || 8000) : null;
+            try {
+                const u = _normalizarUrlVentas(url);
+                const res = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + new Date().getTime(), { method: 'HEAD', signal: ctrl ? ctrl.signal : undefined });
+                if (!res.ok) return null;
+                const n = Number(res.headers.get('content-length'));
+                return Number.isFinite(n) && n > 0 ? n : null;
+            } catch (e) { return null; }
+            finally { if (reloj) clearTimeout(reloj); }
+        }
+        // ¿Se pueden reutilizar las filas guardadas de este archivo en vez de bajarlo otra vez?
+        function _puedeReusarArchivo(d) {
+            if (!d || d.forzar || !d.firma) return false;
+            const f = d.firma;
+            if (f.v !== SYNC_ARCHIVO_VERSION || f.url !== d.url || f.usuario !== d.usuario) return false;
+            if (!(Number.isFinite(d.longitud) && d.longitud > 0 && f.len === d.longitud)) return false;
+            if (!(Number.isFinite(f.ts) && Number.isFinite(d.ahora))) return false;
+            const edad = d.ahora - f.ts;
+            if (edad < 0 || edad > SYNC_ARCHIVO_MAX_DIAS * 86400000) return false;
+            return d.filas > 0 && f.filas === d.filas;
+        }
+
         async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter) {
             const out = [];
             const CHUNK = 1200;
@@ -13114,14 +13169,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
         }
 
         async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
-            let rawUrl = fileObj.url.trim();
-            if (rawUrl.includes('github.com')) {
-                if (rawUrl.includes('/blob/')) {
-                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
-                } else if (rawUrl.includes('/raw/')) {
-                    rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/');
-                }
-            }
+            let rawUrl = _normalizarUrlVentas(fileObj.url);
             const url = rawUrl + (rawUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
             const urlLower = url.toLowerCase();
 
@@ -13671,13 +13719,34 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const rowFilter = buildVendorFilter(currentUser);
                     // Si se difiere el año anterior, conservamos lo que ya hubiera en caché para no perderlo de la vista.
                     const combinedSales = includePrevYear ? [] : (cachedSales || []).filter(s => s.source === 'prevYear');
+                    // Los archivos que casi no cambian (año actual / año anterior) no se vuelven a bajar si pesan lo mismo
+                    // y las filas guardadas siguen aquí (ver _puedeReusarArchivo). "Sincronizar ahora" (force) siempre baja todo.
+                    const firmasNuevas = {};
+                    const usuarioFirma = String(currentUser.rol) + '|' + String(currentUser.id);
                     for (const fileObj of urls) {
                         if (isStale()) return;
                         await yieldToBrowser();
+                        const pesado = fileObj.type === 'currYear' || fileObj.type === 'prevYear';
+                        let longitud = null;
+                        if (pesado && navigator.onLine !== false) {
+                            longitud = await _longitudRemota(fileObj.url);
+                            if (isStale()) return;
+                            if (!force && cachedSales && cachedSales.length) {
+                                const guardadas = cachedSales.filter(s => s.source === fileObj.type);
+                                const firma = _leerFirmaArchivo(userId, fileObj.type);
+                                if (_puedeReusarArchivo({ forzar: force, firma, filas: guardadas.length, longitud, url: fileObj.url.trim(), usuario: usuarioFirma, ahora: Date.now() })) {
+                                    fileObj.maxFecha = firma.maxFecha || '';
+                                    for (let i = 0; i < guardadas.length; i++) combinedSales.push(guardadas[i]);
+                                    console.info('Sin cambios en el archivo "' + fileObj.type + '": se reutilizan ' + guardadas.length + ' filas guardadas.');
+                                    continue;
+                                }
+                            }
+                        }
                         const part = await fetchGithubSalesFile(fileObj, isStale, rowFilter);
                         for (let i = 0; i < part.length; i++) {
                             combinedSales.push(part[i]);
                         }
+                        if (pesado && longitud) firmasNuevas[fileObj.type] = { v: SYNC_ARCHIVO_VERSION, url: fileObj.url.trim(), len: longitud, usuario: usuarioFirma, ts: Date.now(), maxFecha: fileObj.maxFecha || '', filas: part.length };
                     }
                     if (isStale()) return;
 
@@ -13702,7 +13771,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     // la próxima vez volverá a descargar en vez de dar por buena una copia vieja.
                     scheduleHeavyWrite(async () => {
                         const guardada = await saveToCache(cacheKey, combinedSales);
-                        if (guardada) guardarMetaSync(userId, { ts: now.getTime(), version: versionPublicada, dateStr, hasta });
+                        if (guardada) {
+                            guardarMetaSync(userId, { ts: now.getTime(), version: versionPublicada, dateStr, hasta });
+                            for (const tipo of Object.keys(firmasNuevas)) _guardarFirmaArchivo(userId, tipo, firmasNuevas[tipo]);
+                        }
                         if (idUsuarioSyncRef.current === userId) setCopiaSinGuardar(!guardada);
                     });
 
