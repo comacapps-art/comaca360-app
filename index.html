@@ -134,7 +134,7 @@ import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferred
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, deleteField, waitForPendingWrites } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites } from 'firebase/firestore';
 import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft, Award, Paperclip } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
@@ -207,6 +207,11 @@ const formatMonthStr = ym => {
   const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   return `${months[parseInt(m, 10) - 1]} ${y}`;
 };
+const formatFechaVentas = iso => {
+  const p = String(iso || '').split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : '';
+};
+const MENSAJE_PUBLICAR_VENTAS = 'Todos los equipos (computadoras y teléfonos) descargarán de GitHub las ventas más recientes: los que tengan la app abierta, en unos instantes; los demás, la próxima vez que la abran.\n\nHazlo cuando ya hayas subido los archivos nuevos a GitHub. ¿Publicar ahora?';
 const DB_NAME = 'Comaca360Cache';
 const STORE_NAME = 'salesCacheStore';
 const getDB = () => {
@@ -223,17 +228,50 @@ const getDB = () => {
     }
   });
 };
-const saveToCache = async (key, data) => {
+const saveToCache = (key, data) => new Promise(resolve => {
+  let terminado = false;
+  const terminar = (guardada, error) => {
+    if (terminado) return;
+    terminado = true;
+    if (!guardada) console.warn("No se pudo guardar en caché (Ignorando para continuar)", error);
+    resolve(guardada);
+  };
   try {
     if (window.indexedDB) {
-      const idb = await getDB();
-      const tx = idb.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put(data, key);
+      getDB().then(idb => {
+        try {
+          const tx = idb.transaction(STORE_NAME, 'readwrite');
+          tx.oncomplete = () => terminar(true);
+          tx.onerror = () => terminar(false, tx.error);
+          tx.onabort = () => terminar(false, tx.error);
+          tx.objectStore(STORE_NAME).put(data, key);
+        } catch (error) {
+          terminar(false, error);
+        }
+      }).catch(error => terminar(false, error));
     } else {
       localStorage.setItem(key, JSON.stringify(data));
+      terminar(true);
     }
   } catch (error) {
-    console.warn("No se pudo guardar en caché (Ignorando para continuar)", error);
+    terminar(false, error);
+  }
+});
+const META_SYNC_PREFIX = 'githubSyncMeta_';
+const leerMetaSync = userId => {
+  try {
+    const raw = localStorage.getItem(META_SYNC_PREFIX + userId);
+    const meta = raw ? JSON.parse(raw) : null;
+    return meta && typeof meta === 'object' ? meta : null;
+  } catch (e) {
+    return null;
+  }
+};
+const guardarMetaSync = (userId, meta) => {
+  try {
+    localStorage.setItem(META_SYNC_PREFIX + userId, JSON.stringify(meta));
+  } catch (e) {
+    console.warn(e);
   }
 };
 const loadFromCache = async key => {
@@ -12630,14 +12668,18 @@ const VentasAdminPanel = ({
   const handleSaveGithubUrl = async () => {
     setSavingGithubUrl(true);
     try {
+      const cambioEnlaces = urlPrevYear.trim() !== String(appConfig?.githubSalesUrlPrevYear || '').trim() || urlCurrYear.trim() !== String(appConfig?.githubSalesUrlCurrYear || '').trim() || urlCurrMonth.trim() !== String(appConfig?.githubSalesUrlCurrMonth || '').trim();
       await setDoc(doc(db, getCollectionPath('config'), 'settings'), {
         githubSalesUrlPrevYear: urlPrevYear.trim(),
         githubSalesUrlCurrYear: urlCurrYear.trim(),
-        githubSalesUrlCurrMonth: urlCurrMonth.trim()
+        githubSalesUrlCurrMonth: urlCurrMonth.trim(),
+        ...(cambioEnlaces ? {
+          ventasVersion: Date.now()
+        } : {})
       }, {
         merge: true
       });
-      openModal('alert', null, 'Éxito', 'URLs de GitHub vinculadas exitosamente. Las ventas se sincronizarán en vivo.', true);
+      openModal('alert', null, 'Éxito', cambioEnlaces ? 'Enlaces guardados. Todos los equipos descargarán las ventas desde los enlaces nuevos: los que tengan la app abierta, en unos instantes; los demás, al abrirla.' : 'Enlaces guardados (no cambiaron). Si subiste archivos nuevos a GitHub, pulsa "Publicar ventas" para que todos los equipos los descarguen.', true);
     } catch (err) {
       console.error(err);
       openModal('alert', null, 'Error', 'Error al guardar las URLs de GitHub.', true);
@@ -13703,7 +13745,7 @@ const VentasAdminPanel = ({
     className: "font-bold text-slate-800 mb-2"
   }, "Lectura Directa y Combinada (0% Firebase)"), React.createElement("p", {
     className: "text-sm text-slate-500"
-  }, "Cada vez que un usuario abra la app, los tres archivos se procesarán y combinarán. El dashboard identificará automáticamente el mes más reciente de esos 3 archivos para mostrarlo vs cuota."))), React.createElement("div", {
+  }, "Cada equipo guarda una copia de las ventas y la renueva sola una vez al día (después de las 5:00 p.m., hora de Caracas). Cuando subas archivos nuevos a GitHub, pulsa \"Publicar ventas\" para que todos los equipos los descarguen. El dashboard toma como mes en curso el mes más reciente del archivo \"Ventas del Mes en Curso\" para mostrarlo vs cuota."))), React.createElement("div", {
     className: "bg-blue-50/50 p-6 rounded-2xl border border-blue-100"
   }, React.createElement("h3", {
     className: "text-base font-black text-blue-900 mb-4 flex items-center gap-2"
@@ -13742,8 +13784,14 @@ const VentasAdminPanel = ({
     placeholder: "Ej: https://raw.githubusercontent.com/.../ventas_mes_actual.xlsx",
     className: "w-full border-2 border-white focus:border-blue-500 rounded-xl p-3 outline-none font-medium text-slate-700 transition-colors shadow-sm"
   }))), React.createElement("div", {
-    className: "mt-6 flex justify-end"
+    className: "mt-6 flex flex-wrap justify-end gap-3"
   }, React.createElement("button", {
+    onClick: () => openModal('publicarVentas', null, 'Publicar ventas', MENSAJE_PUBLICAR_VENTAS),
+    className: "bg-white hover:bg-slate-50 text-slate-700 border-2 border-slate-200 px-6 py-3.5 rounded-xl font-bold transition-all shadow-sm flex items-center justify-center gap-2 whitespace-nowrap"
+  }, React.createElement(Upload, {
+    size: 20,
+    className: "text-orange-500"
+  }), "Publicar ventas"), React.createElement("button", {
     onClick: handleSaveGithubUrl,
     disabled: savingGithubUrl,
     className: "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-8 py-3.5 rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 whitespace-nowrap"
@@ -15956,6 +16004,18 @@ function buildVendorFilter(user) {
     return typeof v === 'string' && (v.startsWith(uid + " ") || v.startsWith(uid + "-") || v === uid);
   };
 }
+const notaFechaVenta = (fileObj, fecha) => {
+  if (typeof fecha !== 'string') return;
+  const f = fecha.substring(0, 10);
+  if (f > (fileObj.maxFecha || '') && /^\d{4}-\d{2}-\d{2}$/.test(f)) fileObj.maxFecha = f;
+};
+const fechaMasRecienteDeVentas = archivos => {
+  for (const tipo of ['currMonth', 'currYear', 'prevYear']) {
+    const archivo = archivos.find(a => a.type === tipo);
+    if (archivo && archivo.maxFecha) return archivo.maxFecha;
+  }
+  return '';
+};
 async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter) {
   const out = [];
   const CHUNK = 1200;
@@ -15964,13 +16024,14 @@ async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter)
     const end = Math.min(i + CHUNK, excelRows.length);
     for (let j = i; j < end; j++) {
       const m = mapGitHubSalesRow(excelRows[j], fileObj);
+      if (m) notaFechaVenta(fileObj, m.fecha);
       if (m && (!rowFilter || rowFilter(m))) out.push(m);
     }
     await yieldToBrowser();
   }
   return out;
 }
-async function parseJsonSalesChunked(data, sourceType, isCancelled, rowFilter) {
+async function parseJsonSalesChunked(data, sourceType, isCancelled, rowFilter, fileObj) {
   if (!Array.isArray(data)) return [];
   const out = [];
   const CHUNK = 4000;
@@ -15982,6 +16043,7 @@ async function parseJsonSalesChunked(data, sourceType, isCancelled, rowFilter) {
         ...data[j],
         source: sourceType
       };
+      if (fileObj) notaFechaVenta(fileObj, m.fecha);
       if (!rowFilter || rowFilter(m)) out.push(m);
     }
     await yieldToBrowser();
@@ -16017,6 +16079,7 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
     }
     row = [];
     const m = mapGitHubSalesRow(obj, fileObj);
+    if (m) notaFechaVenta(fileObj, m.fecha);
     if (m && (!rowFilter || rowFilter(m))) out.push(m);
   };
   const processText = text => {
@@ -16128,7 +16191,7 @@ async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
     }
     if (isJson) {
       const data = await res.json();
-      return await parseJsonSalesChunked(data, fileObj.type, isStale, rowFilter);
+      return await parseJsonSalesChunked(data, fileObj.type, isStale, rowFilter, fileObj);
     } else if (isCsv) {
       return await streamCsvSalesRows(res, fileObj, isStale, rowFilter);
     } else {
@@ -16148,12 +16211,162 @@ async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
     throw e;
   }
 }
+const MODO_COMPLETO = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('completo') === '1';
+  } catch (e) {
+    return false;
+  }
+})();
+const COLECCIONES_DE_DATOS = ['cartera', 'productos', 'precios', 'cxc', 'pedidos', 'pagos', 'tasas'];
+const PRECARGA_MS = 20000;
+const unirNecesidades = (prev, req) => {
+  let next = prev;
+  for (const [col, alcance] of Object.entries(req)) {
+    const actual = prev[col];
+    const nuevo = actual === 'completo' || alcance === 'completo' ? 'completo' : 'propio';
+    if (actual !== nuevo) {
+      if (next === prev) next = {
+        ...prev
+      };
+      next[col] = nuevo;
+    }
+  }
+  return next;
+};
+const necesidadesDePantalla = (tab, user) => {
+  if (!user) return {};
+  if (MODO_COMPLETO) return Object.fromEntries(COLECCIONES_DE_DATOS.map(c => [c, 'completo']));
+  const rol = user.rol;
+  const mando = rol === 'admin' || rol === 'gerente';
+  const propio = rol === 'vendedor' ? 'propio' : 'completo';
+  switch (tab) {
+    case 'ventas-mes':
+      return mando ? {
+        cartera: 'completo',
+        cxc: 'completo'
+      } : {};
+    case 'ventas-cartera-activacion':
+      return mando ? {
+        cartera: 'completo',
+        cxc: 'completo'
+      } : rol === 'vendedor' ? {
+        cartera: 'propio'
+      } : {};
+    case 'cxc':
+      return mando ? {
+        cartera: 'completo',
+        cxc: 'completo'
+      } : {};
+    case 'incentivos-admin':
+      return {
+        productos: 'completo'
+      };
+    case 'ventas-global':
+      return rol === 'admin' ? {
+        cartera: 'completo',
+        precios: 'completo'
+      } : {};
+    case 'pedidos-vendedor':
+      return {
+        cartera: propio,
+        productos: 'completo',
+        precios: 'completo',
+        pedidos: propio,
+        cxc: 'completo'
+      };
+    case 'pedidos-admin':
+      return mando ? {
+        cartera: 'completo',
+        productos: 'completo',
+        precios: 'completo',
+        pedidos: 'completo',
+        cxc: 'completo'
+      } : {};
+    case 'pagos-reportar':
+      return {
+        cartera: propio,
+        cxc: 'completo',
+        pagos: propio,
+        tasas: 'completo'
+      };
+    case 'pagos-admin':
+      return {
+        cartera: 'completo',
+        pagos: 'completo'
+      };
+    case 'tasas-admin':
+      return {
+        tasas: 'completo'
+      };
+    case 'gerente-mapa':
+      return mando ? {
+        pedidos: 'completo'
+      } : {};
+    default:
+      return {};
+  }
+};
+const variantesIdVendedor = id => {
+  const raw = String(id === undefined || id === null ? '' : id).trim();
+  const out = [];
+  const add = v => {
+    if (v !== '' && !out.includes(v)) out.push(v);
+  };
+  add(raw);
+  const norm = normalizeId(raw);
+  add(norm);
+  if (/^\d+$/.test(norm)) {
+    for (let len = norm.length; len <= 6; len++) add(norm.padStart(len, '0'));
+    add(Number(norm));
+  }
+  return out.slice(0, 10);
+};
+const crearRefColeccion = (nombre, alcance, usuario) => {
+  const base = collection(db, getCollectionPath(nombre));
+  if (alcance !== 'propio' || !usuario) return base;
+  if (nombre === 'pedidos' || nombre === 'pagos') return query(base, where('vendedorId', '==', String(usuario.id)));
+  if (nombre === 'cartera') {
+    const variantes = variantesIdVendedor(usuario.id);
+    if (variantes.length > 0) return query(base, where('idVendedor', 'in', variantes));
+  }
+  return base;
+};
+function useColeccionFirestore(nombre, alcance, usuario, opciones, alRecibir) {
+  const alRecibirRef = useRef(alRecibir);
+  alRecibirRef.current = alRecibir;
+  const clave = alcance && usuario ? `${alcance}:${usuario.id}` : '';
+  useEffect(() => {
+    if (!clave) return;
+    let activo = true;
+    const ok = snap => {
+      if (activo) alRecibirRef.current(snap, clave, null);
+    };
+    const fallo = err => {
+      console.error('Error leyendo ' + nombre, err);
+      if (activo) alRecibirRef.current(null, clave, err);
+    };
+    let unsub = null;
+    try {
+      const ref = crearRefColeccion(nombre, alcance, usuario);
+      unsub = opciones ? onSnapshot(ref, opciones, ok, fallo) : onSnapshot(ref, ok, fallo);
+    } catch (e) {
+      fallo(e);
+    }
+    return () => {
+      activo = false;
+      if (unsub) unsub();
+    };
+  }, [clave]);
+}
 function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [isDbReady, setIsDbReady] = useState(false);
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
   const [isFetchingSales, setIsFetchingSales] = useState(false);
-  const [lastSyncDateStr, setLastSyncDateStr] = useState(() => localStorage.getItem('lastGithubSyncDateStr') || null);
+  const [lastSyncDateStr, setLastSyncDateStr] = useState(null);
+  const [ventasHasta, setVentasHasta] = useState('');
+  const [copiaSinGuardar, setCopiaSinGuardar] = useState(false);
   const [, startSalesTransition] = useTransition();
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -16167,6 +16380,8 @@ function App() {
   const [salesData, setSalesData] = useState([]);
   const deferredSalesData = useDeferredValue(salesData);
   const [appConfig, setAppConfig] = useState(null);
+  const [necesidades, setNecesidades] = useState({});
+  const [listos, setListos] = useState({});
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: null,
@@ -16196,6 +16411,24 @@ function App() {
       isAlert: false
     });
   };
+  const [publicandoVentas, setPublicandoVentas] = useState(false);
+  const publicarVentas = async () => {
+    setPublicandoVentas(true);
+    let resultado;
+    try {
+      await Promise.race([setDoc(doc(db, getCollectionPath('config'), 'settings'), {
+        ventasVersion: Date.now()
+      }, {
+        merge: true
+      }), new Promise((_, rechazar) => setTimeout(() => rechazar(new Error('sin respuesta')), 15000))]);
+      resultado = ['Éxito', 'Listo. Los equipos que tengan la app abierta descargarán las ventas nuevas en unos instantes, y los demás al abrirla.\n\nEn el encabezado, "Ventas hasta" debe mostrar la fecha más reciente de las ventas.'];
+    } catch (err) {
+      console.error(err);
+      resultado = ['Error', 'No se pudo confirmar la publicación (¿sin conexión?). Si la conexión regresa mientras esta página sigue abierta, se enviará sola. Más tarde revisa que "Ventas hasta" se haya actualizado.'];
+    }
+    setPublicandoVentas(false);
+    setTimeout(() => openModal('alert', null, resultado[0], resultado[1], true), 60);
+  };
   const executeConfirmAction = async () => {
     if (modalConfig.isAlert) {
       closeModal();
@@ -16207,7 +16440,7 @@ function App() {
         type,
         payload
       } = modalConfig;
-      if (type === 'deleteUser') await deleteDoc(doc(db, getCollectionPath('users'), payload));else if (type === 'deletePedido') await deleteDoc(doc(db, getCollectionPath('pedidos'), payload));else if (type === 'clearCartera') {
+      if (type === 'publicarVentas') await publicarVentas();else if (type === 'deleteUser') await deleteDoc(doc(db, getCollectionPath('users'), payload));else if (type === 'deletePedido') await deleteDoc(doc(db, getCollectionPath('pedidos'), payload));else if (type === 'clearCartera') {
         const chunksDelete = chunkArray(carteraData, 450);
         await Promise.all(chunksDelete.map(chunk => {
           const batch = writeBatch(db);
@@ -16338,43 +16571,6 @@ function App() {
       }
       setIsDbReady(true);
     });
-    const unsubCartera = onSnapshot(collection(db, getCollectionPath('cartera')), snap => setCarteraData(snap.docs.map(d => ({
-      firebaseId: d.id,
-      ...d.data()
-    }))));
-    const unsubCatalog = onSnapshot(collection(db, getCollectionPath('productos')), snap => setCatalogData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
-    const unsubPrecios = onSnapshot(collection(db, getCollectionPath('precios')), snap => setPreciosData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
-    const unsubCxc = onSnapshot(collection(db, getCollectionPath('cxc')), snap => setCxcData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
-    const unsubPedidos = onSnapshot(collection(db, getCollectionPath('pedidos')), snap => setPedidosData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
-    const unsubPagos = onSnapshot(collection(db, getCollectionPath('pagos')), {
-      includeMetadataChanges: true
-    }, snap => {
-      const nuevos = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        _pendienteEnviar: d.metadata.hasPendingWrites
-      }));
-      setPagosData(prev => {
-        if (snap.metadata.fromCache && prev && nuevos.length < prev.length) return prev;
-        return nuevos;
-      });
-    });
-    const unsubTasas = onSnapshot(collection(db, getCollectionPath('tasas')), snap => setTasasData(snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }))));
     const unsubConfig = onSnapshot(doc(db, getCollectionPath('config'), 'settings'), snap => {
       if (snap.exists()) setAppConfig(snap.data());else setAppConfig({});
       setIsConfigLoaded(true);
@@ -16384,16 +16580,118 @@ function App() {
     });
     return () => {
       unsubUsers();
-      unsubCartera();
-      unsubCatalog();
-      unsubPrecios();
-      unsubCxc();
-      unsubPedidos();
-      unsubPagos();
-      unsubTasas();
       unsubConfig();
     };
   }, [firebaseUser]);
+  const idUsuarioActual = currentUser ? currentUser.id : null;
+  const rolUsuarioActual = currentUser ? currentUser.rol : null;
+  useEffect(() => {
+    setNecesidades({});
+    setListos({});
+    setCarteraData([]);
+    setCatalogData([]);
+    setPreciosData([]);
+    setCxcData([]);
+    setPedidosData([]);
+    setPagosData([]);
+    setTasasData([]);
+  }, [idUsuarioActual]);
+  useEffect(() => {
+    if (!currentUser) return;
+    const req = necesidadesDePantalla(globalActiveTab, currentUser);
+    setNecesidades(prev => unirNecesidades(prev, req));
+  }, [idUsuarioActual, rolUsuarioActual, globalActiveTab]);
+  useEffect(() => {
+    if (!currentUser || currentUser.rol !== 'vendedor' || MODO_COMPLETO) return;
+    let temporizador = null;
+    const precargar = () => {
+      if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+      setNecesidades(prev => {
+        let next = prev;
+        ['ventas-cartera-activacion', 'pedidos-vendedor', 'pagos-reportar'].filter(t => hasPermForUser(t, currentUser)).forEach(t => {
+          next = unirNecesidades(next, necesidadesDePantalla(t, currentUser));
+        });
+        return next;
+      });
+    };
+    const armar = () => {
+      clearTimeout(temporizador);
+      temporizador = setTimeout(precargar, PRECARGA_MS);
+    };
+    const alCambiarVisibilidad = () => {
+      if (document.visibilityState === 'visible') armar();else clearTimeout(temporizador);
+    };
+    document.addEventListener('visibilitychange', alCambiarVisibilidad);
+    if (document.visibilityState === 'visible') armar();
+    return () => {
+      clearTimeout(temporizador);
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad);
+    };
+  }, [idUsuarioActual, rolUsuarioActual]);
+  const marcarListo = (col, clave) => setListos(prev => prev[col] === clave ? prev : {
+    ...prev,
+    [col]: clave
+  });
+  const subirAlcance = col => setNecesidades(prev => prev[col] === 'completo' ? prev : {
+    ...prev,
+    [col]: 'completo'
+  });
+  const recibirColeccion = (col, aplicar, vacioEsFalla) => (snap, clave, err) => {
+    const propio = clave.startsWith('propio:');
+    if (err) {
+      if (propio) subirAlcance(col);else marcarListo(col, clave);
+      return;
+    }
+    if (propio && vacioEsFalla && snap.empty && !snap.metadata.fromCache) {
+      subirAlcance(col);
+      return;
+    }
+    aplicar(snap);
+    marcarListo(col, clave);
+  };
+  useColeccionFirestore('cartera', necesidades.cartera, currentUser, null, recibirColeccion('cartera', snap => setCarteraData(snap.docs.map(d => ({
+    firebaseId: d.id,
+    ...d.data()
+  }))), true));
+  useColeccionFirestore('productos', necesidades.productos, currentUser, null, recibirColeccion('productos', snap => setCatalogData(snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  })))));
+  useColeccionFirestore('precios', necesidades.precios, currentUser, null, recibirColeccion('precios', snap => setPreciosData(snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  })))));
+  useColeccionFirestore('cxc', necesidades.cxc, currentUser, null, recibirColeccion('cxc', snap => setCxcData(snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  })))));
+  useColeccionFirestore('pedidos', necesidades.pedidos, currentUser, null, recibirColeccion('pedidos', snap => setPedidosData(snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  })))));
+  useColeccionFirestore('pagos', necesidades.pagos, currentUser, {
+    includeMetadataChanges: true
+  }, recibirColeccion('pagos', snap => {
+    const nuevos = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      _pendienteEnviar: d.metadata.hasPendingWrites
+    }));
+    setPagosData(prev => {
+      if (snap.metadata.fromCache && prev && nuevos.length < prev.length) return prev;
+      return nuevos;
+    });
+  }));
+  useColeccionFirestore('tasas', necesidades.tasas, currentUser, null, recibirColeccion('tasas', snap => setTasasData(snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  })))));
+  const requeridas = currentUser ? necesidadesDePantalla(globalActiveTab, currentUser) : {};
+  const cargandoDatos = !!currentUser && Object.entries(requeridas).some(([col, alcance]) => {
+    const n = necesidades[col];
+    if (!n || alcance === 'completo' && n !== 'completo') return true;
+    return listos[col] !== `${n}:${currentUser.id}`;
+  });
   const getLastSyncBoundary = React.useCallback(() => {
     const now = new Date();
     const hoursUTC = now.getUTCHours();
@@ -16403,10 +16701,24 @@ function App() {
       return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 21, 0, 0)).getTime();
     }
   }, []);
+  const bajadaEnSesionRef = React.useRef('');
+  const idUsuarioSyncRef = React.useRef(null);
+  idUsuarioSyncRef.current = currentUser ? currentUser.id : null;
+  useEffect(() => {
+    const meta = currentUser ? leerMetaSync(currentUser.id) : null;
+    setLastSyncDateStr(meta && meta.dateStr ? meta.dateStr : null);
+    setVentasHasta(meta && meta.hasta ? meta.hasta : '');
+    setCopiaSinGuardar(false);
+  }, [currentUser?.id]);
   const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null, includePrevYear = true) => {
     const isStale = externalIsStale || (() => false);
     if (!appConfig || !currentUser) return;
-    const cacheKey = 'salesData_' + currentUser.id;
+    const userId = currentUser.id;
+    const cacheKey = 'salesData_' + userId;
+    const versionPublicada = Number(appConfig.ventasVersion) || 0;
+    const boundary = getLastSyncBoundary();
+    const claveSesion = userId + '|' + versionPublicada + '|' + boundary;
+    if (!force && bajadaEnSesionRef.current === claveSesion) return;
     let cachedSales = null;
     try {
       cachedSales = await loadFromCache(cacheKey);
@@ -16414,19 +16726,23 @@ function App() {
       console.warn(e);
     }
     if (isStale()) return;
-    const boundary = getLastSyncBoundary();
-    const lastSyncToken = localStorage.getItem('lastGithubSyncTimestamp');
-    const lastSync = lastSyncToken ? parseInt(lastSyncToken, 10) : 0;
-    if (!force && cachedSales && cachedSales.length > 0 && lastSync >= boundary) {
+    const meta = leerMetaSync(userId);
+    const copiaAlDia = !!meta && (Number(meta.ts) || 0) >= boundary && (Number(meta.version) || 0) === versionPublicada;
+    const hayCopia = !!cachedSales && cachedSales.length > 0;
+    if (!force && hayCopia && copiaAlDia) {
       startSalesTransition(() => {
-        if (!isStale()) setSalesData(cachedSales);
+        if (!isStale()) {
+          setSalesData(cachedSales);
+          bajadaEnSesionRef.current = claveSesion;
+        }
       });
       return;
     }
-    if (!force && cachedSales && cachedSales.length > 0) {
+    if (!force && hayCopia) {
       startSalesTransition(() => {
         if (!isStale()) setSalesData(cachedSales);
       });
+      if (navigator.onLine === false) return;
     }
     const urls = [...(includePrevYear ? [{
       url: appConfig?.githubSalesUrlPrevYear,
@@ -16458,9 +16774,9 @@ function App() {
       }
       if (isStale()) return;
       startSalesTransition(() => setSalesData(combinedSales));
-      scheduleHeavyWrite(() => saveToCache(cacheKey, combinedSales));
+      bajadaEnSesionRef.current = claveSesion;
+      if (!includePrevYear && prevYearFetchStateRef.current === 'done' && !combinedSales.some(s => s.source === 'prevYear')) prevYearFetchStateRef.current = 'idle';
       const now = new Date();
-      localStorage.setItem('lastGithubSyncTimestamp', now.getTime().toString());
       const vetOpts = {
         timeZone: 'America/Caracas',
         year: 'numeric',
@@ -16475,8 +16791,21 @@ function App() {
       } catch (e) {
         dateStr = now.toLocaleString();
       }
-      localStorage.setItem('lastGithubSyncDateStr', dateStr);
-      if (!isStale()) setLastSyncDateStr(dateStr);
+      const hasta = fechaMasRecienteDeVentas(urls);
+      if (!isStale()) {
+        setLastSyncDateStr(dateStr);
+        setVentasHasta(hasta);
+      }
+      scheduleHeavyWrite(async () => {
+        const guardada = await saveToCache(cacheKey, combinedSales);
+        if (guardada) guardarMetaSync(userId, {
+          ts: now.getTime(),
+          version: versionPublicada,
+          dateStr,
+          hasta
+        });
+        if (idUsuarioSyncRef.current === userId) setCopiaSinGuardar(!guardada);
+      });
     } catch (err) {
       console.error("Error crítico cargando ventas:", err);
       if (!isStale()) openModal('alert', null, 'Error de Sincronización', err.message || 'Hubo un error al procesar los archivos de GitHub.', true);
@@ -16491,13 +16820,33 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     const isStale = () => cancelled;
+    let enCurso = false;
+    const revisar = async () => {
+      if (cancelled || enCurso) return;
+      enCurso = true;
+      try {
+        await fetchGitHubData(false, isStale, false);
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        enCurso = false;
+      }
+    };
+    const alVolverALaApp = () => {
+      if (document.visibilityState === 'visible') revisar();
+    };
     if (isConfigLoaded && currentUser) {
-      fetchGitHubData(false, isStale, false);
+      revisar();
+      window.addEventListener('online', revisar);
+      document.addEventListener('visibilitychange', alVolverALaApp);
     } else if (!isConfigLoaded || !currentUser) {
       startSalesTransition(() => setSalesData([]));
+      bajadaEnSesionRef.current = '';
     }
     return () => {
       cancelled = true;
+      window.removeEventListener('online', revisar);
+      document.removeEventListener('visibilitychange', alVolverALaApp);
     };
   }, [appConfig?.githubSalesUrlPrevYear, appConfig?.githubSalesUrlCurrYear, appConfig?.githubSalesUrlCurrMonth, isConfigLoaded, currentUser?.id, fetchGitHubData]);
   const prevYearFetchStateRef = React.useRef('idle');
@@ -16883,7 +17232,11 @@ function App() {
     className: "text-orange-500"
   }, "360")), lastSyncDateStr && React.createElement("p", {
     className: "text-[9px] text-blue-300 font-medium truncate mt-0.5"
-  }, "Sinc.: ", lastSyncDateStr)), React.createElement("div", {
+  }, "Sinc.: ", lastSyncDateStr), ventasHasta && React.createElement("p", {
+    className: "text-[9px] text-blue-300 font-medium truncate"
+  }, "Ventas hasta ", formatFechaVentas(ventasHasta)), copiaSinGuardar && React.createElement("p", {
+    className: "text-[9px] text-orange-300 font-bold truncate"
+  }, "Copia sin guardar en este equipo")), React.createElement("div", {
     className: "flex items-center gap-1 shrink-0"
   }, React.createElement("button", {
     onClick: handleManualSync,
@@ -16895,7 +17248,16 @@ function App() {
   }), " Sinc...") : React.createElement(React.Fragment, null, React.createElement(RefreshCw, {
     size: 14,
     className: "text-orange-400"
-  }), " Sincronizar")), React.createElement("button", {
+  }), " Sincronizar")), currentUser.rol === 'admin' && React.createElement("button", {
+    onClick: () => openModal('publicarVentas', null, 'Publicar ventas', MENSAJE_PUBLICAR_VENTAS),
+    disabled: publicandoVentas,
+    "aria-label": "Publicar ventas",
+    title: "Publicar ventas",
+    className: "p-2 hover:bg-blue-800 active:bg-blue-700 disabled:opacity-60 rounded-xl transition-colors"
+  }, React.createElement(Upload, {
+    size: 20,
+    className: "text-orange-400"
+  })), React.createElement("button", {
     onClick: handleLogout,
     "aria-label": "Salir",
     className: "p-2 hover:bg-blue-800 active:bg-blue-700 rounded-xl transition-colors"
@@ -16910,17 +17272,32 @@ function App() {
   }, label))), React.createElement("header", {
     className: "bg-white px-8 py-4 shadow-sm border-b border-slate-100 hidden md:flex justify-between items-center z-10 shrink-0 print-hide"
   }, React.createElement("h2", {
-    className: "text-xl font-bold text-slate-800 capitalize"
+    className: "text-xl font-bold text-slate-800 capitalize min-w-0 truncate"
   }, "COMACA 360 / ", currentUser.rol), React.createElement("div", {
-    className: "flex items-center gap-4"
-  }, lastSyncDateStr && React.createElement("div", {
-    className: "text-[10px] text-slate-400 font-medium text-right leading-tight"
-  }, "Última sincronización", React.createElement("br", null), React.createElement("span", {
+    className: "flex items-center gap-4 shrink-0"
+  }, (lastSyncDateStr || ventasHasta) && React.createElement("div", {
+    className: "text-[10px] text-slate-400 font-medium text-right leading-tight whitespace-nowrap"
+  }, lastSyncDateStr && React.createElement(React.Fragment, null, "Última sincronización", React.createElement("br", null), React.createElement("span", {
     className: "text-slate-600 font-bold"
-  }, lastSyncDateStr)), React.createElement("button", {
+  }, lastSyncDateStr)), ventasHasta && React.createElement(React.Fragment, null, lastSyncDateStr && React.createElement("br", null), "Ventas hasta ", React.createElement("span", {
+    className: "text-slate-600 font-bold"
+  }, formatFechaVentas(ventasHasta))), copiaSinGuardar && React.createElement(React.Fragment, null, React.createElement("br", null), React.createElement("span", {
+    className: "text-orange-500 font-bold"
+  }, "Copia sin guardar en este equipo"))), currentUser.rol === 'admin' && React.createElement("button", {
+    onClick: () => openModal('publicarVentas', null, 'Publicar ventas', MENSAJE_PUBLICAR_VENTAS),
+    disabled: publicandoVentas,
+    title: "Avisa a todos los equipos que bajen las ventas nuevas de GitHub",
+    "aria-label": "Publicar ventas",
+    className: "text-sm font-bold text-slate-600 bg-white hover:bg-slate-50 border-2 border-slate-200 px-3 xl:px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 whitespace-nowrap"
+  }, React.createElement(Upload, {
+    size: 14,
+    className: "text-orange-500"
+  }), " ", React.createElement("span", {
+    className: "hidden xl:inline"
+  }, "Publicar ventas")), React.createElement("button", {
     onClick: handleManualSync,
     disabled: isFetchingSales,
-    className: "text-sm font-bold text-slate-600 bg-white hover:bg-slate-50 border-2 border-slate-200 px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+    className: "text-sm font-bold text-slate-600 bg-white hover:bg-slate-50 border-2 border-slate-200 px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 whitespace-nowrap"
   }, isFetchingSales ? React.createElement(React.Fragment, null, React.createElement("div", {
     className: "w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
   }), " Sincronizando...") : React.createElement(React.Fragment, null, React.createElement(RefreshCw, {
@@ -16938,7 +17315,13 @@ function App() {
     className: "fixed bottom-6 right-6 bg-slate-800 text-white px-4 py-2 rounded-xl shadow-xl flex items-center gap-2 z-50 text-sm"
   }, React.createElement("div", {
     className: "w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
-  }), " Sincronizando ventas…"), globalActiveTab === 'guia' && React.createElement(GuiaUsuario, {
+  }), " Sincronizando ventas…"), cargandoDatos ? React.createElement("div", {
+    className: "flex flex-col items-center justify-center py-24"
+  }, React.createElement("div", {
+    className: "w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"
+  }), React.createElement("p", {
+    className: "font-bold text-blue-900"
+  }, "Cargando datos…")) : React.createElement(React.Fragment, null, globalActiveTab === 'guia' && React.createElement(GuiaUsuario, {
     currentUser: currentUser
   }), globalActiveTab === 'ventas-ia' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && React.createElement(AIAnalysisDashboard, {
     currentUser: currentUser,
@@ -17054,7 +17437,7 @@ function App() {
     cxc: cxcData,
     initialTab: "cxc",
     currentUser: currentUser
-  }))));
+  })))));
 }
 const rootElement = document.getElementById('root');
 const root = createRoot(rootElement);
