@@ -22,9 +22,10 @@ const CONGELADO = args.includes('--congelado');
 const BASE = ['normalizeId', 'parseNum', 'yieldToBrowser', 'mapGitHubSalesRow', 'buildVendorFilter', 'notaFechaVenta',
   'parseExcelRowsChunked', 'parseJsonSalesChunked', 'streamCsvSalesRows'];
 const EXTRA = String(opt('extra', '') || '').split(',').map(s => s.trim()).filter(Boolean);
-// Auxiliares del Paso 1 (resolución de columnas una vez por firma de cabeceras). Son OPCIONALES: la versión del 12-nov no
+// Auxiliares del Paso 1 (resolución de columnas una vez por firma de cabeceras) y cederElHilo (cesión del hilo sin esperar al
+// siguiente cuadro de pantalla). Son OPCIONALES: la versión del 12-nov no
 // las tiene y no es un error que falten; si están en el index.html, se extraen junto con mapGitHubSalesRow.
-const OPCIONALES = ['_normalizarClave', '_ALIAS_VENTAS', '_ALIAS_VENTAS_NORM', '_columnasPorFirma', '_ultClaves', '_ultCols', '_columnasDe'];
+const OPCIONALES = ['_normalizarClave', '_ALIAS_VENTAS', '_ALIAS_VENTAS_NORM', '_columnasPorFirma', '_ultClaves', '_ultCols', '_columnasDe', 'cederElHilo'];
 const NOMBRES = [...BASE, ...EXTRA];
 
 const buf = fs.readFileSync(SRC);

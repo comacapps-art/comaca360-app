@@ -12869,6 +12869,26 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             else setTimeout(resolve, 0);
         });
 
+        // Cede el hilo mientras se procesan archivos grandes (ventas) SIN esperar al siguiente cuadro de pantalla.
+        // yieldToBrowser espera a requestAnimationFrame, y con la página oculta, la ventana tapada o minimizada el navegador
+        // lo pausa o lo frena mucho (en las pruebas, ≈ 1 cuadro por segundo o ninguno): cada cesión costaba hasta ≈ 1 s o se
+        // quedaba esperando, y el archivo del año cede ≈ 250 veces (la sincronización tardaba minutos y solo avanzaba "sin
+        // salirse de la pestaña"). Un mensaje de MessageChannel es una tarea normal del navegador: no se frena en segundo
+        // plano, y entre una tarea y otra el navegador puede seguir atendiendo toques y pintando (esto último no está medido).
+        // Límites: si el sistema SUSPENDE la página (iPhone al pasar a otra app, pantalla apagada) nada avanza, ni con esto.
+        // yieldToBrowser se conserva para lo que sí necesita que se pinte entre pasos (el avance de la matriz en PDF) y, por
+        // eso, sigue pudiendo frenarse en segundo plano.
+        // En Node (pruebas) no hay documento: se usa setTimeout, como antes, y no queda ningún puerto abierto.
+        const cederElHilo = (() => {
+            if (typeof MessageChannel !== 'undefined' && typeof document !== 'undefined') {
+                const canal = new MessageChannel();
+                const esperando = [];
+                canal.port1.onmessage = () => { const seguir = esperando.shift(); if (seguir) seguir(); };
+                return () => new Promise((resolve) => { esperando.push(resolve); canal.port2.postMessage(0); });
+            }
+            return () => new Promise((resolve) => setTimeout(resolve, 0));
+        })();
+
         const scheduleHeavyWrite = (fn) => {
             if (typeof requestIdleCallback !== 'undefined') {
                 requestIdleCallback(() => { try { fn(); } catch (e) { console.warn(e); } }, { timeout: 8000 });
@@ -13119,7 +13139,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     if (m) notaFechaVenta(fileObj, m.fecha);
                     if (m && (!rowFilter || rowFilter(m))) out.push(m);
                 }
-                await yieldToBrowser();
+                await cederElHilo();
             }
             return out;
         }
@@ -13136,7 +13156,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     if (fileObj) notaFechaVenta(fileObj, m.fecha);
                     if (!rowFilter || rowFilter(m)) out.push(m);
                 }
-                await yieldToBrowser();
+                await cederElHilo();
             }
             return out;
         }
@@ -13251,7 +13271,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 }
                 processText(text);
                 sinceYield += text.length;
-                if (sinceYield > 600000) { sinceYield = 0; await yieldToBrowser(); }
+                if (sinceYield > 600000) { sinceYield = 0; await cederElHilo(); }
             }
             decoder.decode(new Uint8Array()); // finalizar decoder
             if (separator === null && pending) { // archivo de una sola línea sin salto final
@@ -13292,10 +13312,10 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     return await streamCsvSalesRows(res, fileObj, isStale, rowFilter);
                 } else {
                     const arrayBuffer = await res.arrayBuffer();
-                    await yieldToBrowser();
+                    await cederElHilo();
                     if (!window.XLSX) throw new Error("XLSX no disponible");
                     const workbook = window.XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
-                    await yieldToBrowser();
+                    await cederElHilo();
                     const sheetName = workbook.SheetNames[0];
                     const excelRows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
                     return await parseExcelRowsChunked(excelRows, fileObj, isStale, rowFilter);
@@ -13822,7 +13842,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                     const usuarioFirma = String(currentUser.rol) + '|' + String(currentUser.id);
                     for (const fileObj of urls) {
                         if (isStale()) return;
-                        await yieldToBrowser();
+                        await cederElHilo();
                         const pesado = fileObj.type === 'currYear' || fileObj.type === 'prevYear';
                         let longitud = null;
                         if (pesado && navigator.onLine !== false) {
