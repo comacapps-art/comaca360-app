@@ -16127,6 +16127,7 @@ function _puedeReusarArchivo(d) {
   if (!(Number.isFinite(f.ts) && Number.isFinite(d.ahora))) return false;
   const edad = d.ahora - f.ts;
   if (edad < 0 || edad > SYNC_ARCHIVO_MAX_DIAS * 86400000) return false;
+  if (d.filas === 0) return d.hayCopia === true && f.filas === 0;
   return d.filas > 0 && f.filas === d.filas;
 }
 async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter) {
@@ -16174,6 +16175,22 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
   let pendingQuote = false;
   let pending = '';
   let sinceYield = 0;
+  const copiasUnicas = new Map();
+  const copiaUnica = v => {
+    let c = copiasUnicas.get(v);
+    if (c === undefined) {
+      c = (' ' + v).slice(1);
+      copiasUnicas.set(c, c);
+    }
+    return c;
+  };
+  const aplanarFila = m => {
+    for (const k in m) {
+      const v = m[k];
+      if (typeof v === 'string' && v.length >= 13) m[k] = copiaUnica(v);
+    }
+    return m;
+  };
   const finishRow = () => {
     row.push(field);
     field = '';
@@ -16193,7 +16210,7 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
     row = [];
     const m = mapGitHubSalesRow(obj, fileObj);
     if (m) notaFechaVenta(fileObj, m.fecha);
-    if (m && (!rowFilter || rowFilter(m))) out.push(m);
+    if (m && (!rowFilter || rowFilter(m))) out.push(aplanarFila(m));
   };
   const processText = text => {
     let i = 0;
@@ -16908,6 +16925,7 @@ function App() {
               forzar: force,
               firma,
               filas: guardadas.length,
+              hayCopia: true,
               longitud,
               url: fileObj.url.trim(),
               usuario: usuarioFirma,
