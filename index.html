@@ -851,6 +851,11 @@
         // Un cliente está "activo" en un grupo/producto si tiene alguna venta con monto>0
         // o cajas>0 dentro del rango de fechas — no hace falta que las dos cosas den positivo.
         //
+        // Los MONTOS y las CAJAS son netos de devoluciones (llegan en negativo), igual que "Indicadores": se suma todo lo
+        // que trae el período, no solo las ventas. Una devolución no activa a nadie ni mueve la fecha de la última compra.
+        // Las devoluciones de clientes que no compraron nada en el período no salen en la lista, pero SÍ restan en el total
+        // de la ruta (`devolucionesSinCompra` dice cuánto), para que esta pantalla y "Indicadores" den la misma cifra.
+        //
         // La CARTERA es el universo de referencia: sin ella solo se puede saber quién SÍ
         // compró, nunca quién falta. Cada ruta se arma con TODOS sus clientes de cartera;
         // los que no aparecen en las ventas filtradas quedan como "sin activar". Una ruta que
@@ -889,8 +894,9 @@
                 if (!r.clientes.has(idC)) r.clientes.set(idC, { idCliente: c.idCliente, cliente: c.cliente || idC });
             });
 
-            // Clientes activos: agregado por (ruta, cliente) desde las ventas filtradas.
-            const activos = new Map(); // "idVendedorNorm||idClienteNorm" -> registro con monto/cajas
+            // Por (ruta, cliente): se suma TODO lo que trae el período, ventas y devoluciones. "Activo" sigue significando que
+            // compró algo (alguna fila con monto>0 o cajas>0).
+            const acumulado = new Map(); // "idVendedorNorm||idClienteNorm" -> registro con monto/cajas netos
             (sales || []).forEach(s => {
                 if (!s || !s.fecha) return;
                 if (grupo && s.grupo !== grupo) return;
@@ -902,27 +908,44 @@
 
                 const monto = Number(s.monto) || 0;
                 const cajas = Number(s.cajas) || 0;
-                if (monto <= 0 && cajas <= 0) return; // no aporta activación
 
-                const { key: idVKey } = obtenerRuta(s.idVendedor, s.vendedor);
+                // La ruta solo se crea con una venta (en el mismo orden que antes): una devolución sola no abre rutas nuevas
+                // ni cambia el orden en que salen. Su monto queda en `acumulado` y cuenta si la ruta ya existe.
+                const idVKey = normalizeId(s.idVendedor) || 'S/N';
+                if (monto > 0 || cajas > 0) obtenerRuta(s.idVendedor, s.vendedor);
                 const idC = normalizeId(s.idCliente) || s.idCliente || 'S/N';
                 const key = idVKey + '||' + idC;
-                if (!activos.has(key)) {
-                    activos.set(key, {
+                if (!acumulado.has(key)) {
+                    acumulado.set(key, {
                         idVendedorKey: idVKey, idCliente: s.idCliente || idC, cliente: s.cliente || idC,
-                        monto: 0, cajas: 0, ultimaCompra: fechaStr
+                        monto: 0, cajas: 0, compro: false, ultimaCompra: ''
                     });
                 }
-                const a = activos.get(key);
+                const a = acumulado.get(key);
                 a.monto += monto;
                 a.cajas += cajas;
-                if (fechaStr > a.ultimaCompra) a.ultimaCompra = fechaStr;
+                if (monto > 0 || cajas > 0) { // solo una venta activa al cliente y fija la fecha de su última compra
+                    if (!a.compro) { a.idCliente = s.idCliente || idC; a.cliente = s.cliente || idC; } // el código y el nombre que se muestran salen de la primera VENTA, como antes
+                    a.compro = true;
+                    if (fechaStr > a.ultimaCompra) a.ultimaCompra = fechaStr;
+                }
             });
+            const activos = new Map(); // solo los clientes que compraron algo
+            acumulado.forEach((a, k) => { if (a.compro) activos.set(k, a); });
 
             const porRuta = [];
             rutas.forEach((r, key) => {
                 const clientesActivos = [];
                 activos.forEach(a => { if (a.idVendedorKey === key) clientesActivos.push(a); });
+
+                // Total de la ruta: neto de todo lo que trae el período, incluidas las devoluciones de clientes que no
+                // compraron nada (no salen en la lista, pero sí restan en "Indicadores").
+                let montoRuta = 0, cajasRuta = 0, devMonto = 0, devCajas = 0;
+                acumulado.forEach(a => {
+                    if (a.idVendedorKey !== key) return;
+                    montoRuta += a.monto; cajasRuta += a.cajas;
+                    if (!a.compro) { devMonto += a.monto; devCajas += a.cajas; }
+                });
 
                 const idsActivos = new Set(clientesActivos.map(a => normalizeId(a.idCliente) || a.idCliente));
                 const clientesInactivos = Array.from(r.clientes.values()).filter(c => !idsActivos.has(normalizeId(c.idCliente) || c.idCliente));
@@ -935,8 +958,9 @@
                 porRuta.push({
                     idVendedor: r.idVendedor, vendedor: r.vendedor,
                     clientesActivos: clientesActivos.length,
-                    monto: clientesActivos.reduce((s, a) => s + a.monto, 0),
-                    cajas: clientesActivos.reduce((s, a) => s + a.cajas, 0),
+                    monto: montoRuta,
+                    cajas: cajasRuta,
+                    devolucionesSinCompra: { monto: devMonto, cajas: devCajas },
                     clientes: clientesActivos,
                     clientesSinActivar: clientesInactivos.length,
                     clientesInactivos
@@ -6495,7 +6519,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 Mes en curso: {formatMonthStr(currentMonthStr)}
                             </span>
                         </div>
-                        <p className="text-slate-500 text-sm font-medium mb-5">Un cliente cuenta como activo si compró algo (monto o cajas) del filtro elegido, dentro del mes en curso.</p>
+                        <p className="text-slate-500 text-sm font-medium mb-5">Un cliente cuenta como activo si compró algo (monto o cajas) del filtro elegido, dentro del mes en curso. Los montos y las cajas ya descuentan las devoluciones, igual que en la pantalla principal de ventas.</p>
 
                         <div className="flex flex-wrap gap-3 items-end">
                             <div className="flex flex-col gap-1">
@@ -6632,6 +6656,9 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                                     </tbody>
                                                                 </table>
                                                             </div>
+                                                            {vistaCliente === 'activos' && r.devolucionesSinCompra && (r.devolucionesSinCompra.monto !== 0 || r.devolucionesSinCompra.cajas !== 0) && (
+                                                                <p className="text-[11px] text-slate-500 mt-2 px-1">El total de la ruta ya descuenta ${money(Math.abs(r.devolucionesSinCompra.monto))} y {money(Math.abs(r.devolucionesSinCompra.cajas))} cajas de devoluciones de clientes sin compras {hayFiltroProducto ? 'de lo filtrado ' : ''}en esta ruta este mes (esos clientes no salen en esta lista).</p>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 )}
