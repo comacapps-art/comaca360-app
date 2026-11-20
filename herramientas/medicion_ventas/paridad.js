@@ -161,7 +161,11 @@ const filtroDe = (mod, id) => (id ? mod.buildVendorFilter({ rol: 'vendedor', id 
   }
   // B) CSV completo
   const fijos = [Buffer.alloc(0), Buffer.from('\n'), Buffer.from('Cliente;Articulo'), Buffer.from('Cliente;Articulo\n'), Buffer.from('Cliente;Articulo\nA;B'),
-    Buffer.from('Cliente,Articulo\r\n"A, S.A.","B ""x"""\r\n'), Buffer.from('Cliente;Articulo\n\n  \nA;B\n\n'), Buffer.from('Cliente;Articulo\r\n"A\r\nB";C\r\n')];
+    Buffer.from('Cliente,Articulo\r\n"A, S.A.","B ""x"""\r\n'), Buffer.from('Cliente;Articulo\n\n  \nA;B\n\n'), Buffer.from('Cliente;Articulo\r\n"A\r\nB";C\r\n'),
+    // Tokenizador (Paso 1): comillas a mitad de campo, \r suelto, comilla sin cerrar, vacíos entre comillas, \r y \n dentro de comillas, comilla al final
+    Buffer.from('Cliente;Articulo\nab"cd;ef"gh;x\n'), Buffer.from('Cliente;Articulo\nab\rcd;e\rf\r\n'), Buffer.from('Cliente;Articulo\n"sin cerrar;B\nC;D\n'),
+    Buffer.from('Cliente;Articulo\n"";""\n"""";"x"""\n'), Buffer.from('Cliente;Articulo\n"a\rb";"c\nd\r\ne"\n'), Buffer.from('Cliente;Articulo\n"fin"'), Buffer.from('Cliente;Articulo\n"fin""'),
+    Buffer.from('Cliente,Articulo\n"a"""b""c,d\n'), Buffer.from('Cliente;Articulo\r\r\nA;B\r\r\n')];
   const csvs = [...fijos, ...Array.from({ length: CASOS_CSV }, () => csvAleatorio())];
   for (const buf of csvs) {
     const id = pick(['53', '053', '0053', 'S/N', '90', '1', null, null]);
