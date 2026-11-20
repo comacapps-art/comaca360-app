@@ -33,6 +33,7 @@ const prueba = async (nombre, fn) => {
     firma: { v: m.SYNC_ARCHIVO_VERSION, url: 'https://x/y.csv', len: 149753171, usuario: 'vendedor|53', ts: AHORA - 86400000, maxFecha: '2026-11-05', filas: 1000 },
   });
   await prueba('mismo tamaño, mismas filas, mismo usuario y enlace, reciente -> reutiliza', () => assert.strictEqual(m._puedeReusarArchivo(base()), true));
+  await prueba('usuario sin filas en el archivo, con copia y firma de 0 filas -> reutiliza', () => { const d = base(); d.filas = 0; d.firma.filas = 0; d.hayCopia = true; assert.strictEqual(m._puedeReusarArchivo(d), true); });
   const casos = [
     ['"Sincronizar ahora" (forzar) -> no reutiliza', (d) => { d.forzar = true; }],
     ['el archivo pesa distinto -> no reutiliza', (d) => { d.longitud += 1; }],
@@ -42,7 +43,8 @@ const prueba = async (nombre, fn) => {
     ['otro enlace -> no reutiliza', (d) => { d.url = 'https://x/otro.csv'; }],
     ['otro usuario o rol -> no reutiliza', (d) => { d.usuario = 'admin|53'; }],
     ['otro número de filas guardadas -> no reutiliza', (d) => { d.filas = 999; }],
-    ['sin filas guardadas -> no reutiliza', (d) => { d.filas = 0; d.firma.filas = 0; }],
+    ['sin filas guardadas y sin copia -> no reutiliza', (d) => { d.filas = 0; d.firma.filas = 0; }],
+    ['sin filas guardadas, con copia, pero la firma tenía filas -> no reutiliza', (d) => { d.filas = 0; d.hayCopia = true; }],
     ['versión de lectura distinta -> no reutiliza', (d) => { d.firma.v = m.SYNC_ARCHIVO_VERSION + 1; }],
     ['firma de hace más de 7 días -> no reutiliza', (d) => { d.firma.ts = AHORA - (m.SYNC_ARCHIVO_MAX_DIAS * 86400000 + 1); }],
     ['firma justo en el límite de 7 días -> sí reutiliza', (d) => { d.firma.ts = AHORA - m.SYNC_ARCHIVO_MAX_DIAS * 86400000; }, true],
@@ -61,9 +63,9 @@ const prueba = async (nombre, fn) => {
   console.log('\n_normalizarUrlVentas (igual que la lógica anterior de fetchGithubSalesFile)');
   const viejo = (u) => { let rawUrl = u.trim(); if (rawUrl.includes('github.com')) { if (rawUrl.includes('/blob/')) rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/'); else if (rawUrl.includes('/raw/')) rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/'); } return rawUrl; };
   const urls = [
-    'https://github.com/comacapps-art/COMACAPP2/blob/main/VENTAS%20MES%20EN%20CURSO.XLS', 'https://github.com/comacapps-art/COMACAPP2/raw/main/a.csv',
-    'https://raw.githubusercontent.com/comacapps-art/COMACAPP2/datos-csv/VENTAS%20MES%20EN%20CURSO.csv', 'https://raw.githubusercontent.com/comacapps-art/COMACAPP2/refs/heads/main/VENTAS%20MES%20EN%20CURSO.XLS',
-    'https://media.githubusercontent.com/media/comacapps-art/COMACAPP2/main/VENTAS%202026%20(1).csv', '  https://ejemplo.com/ventas.json  ', 'https://github.com/x/y/blob/main/a.xlsx?token=abc', 'https://ejemplo.com/a.csv?x=1',
+    'https://github.com/org/repo-ventas/blob/main/ventas_mes.XLS', 'https://github.com/org/repo-ventas/raw/main/a.csv',
+    'https://raw.githubusercontent.com/org/repo-ventas/datos-csv/ventas_mes.csv', 'https://raw.githubusercontent.com/org/repo-ventas/refs/heads/main/ventas_mes.XLS',
+    'https://media.githubusercontent.com/media/org/repo-ventas/main/ventas_anio.csv', '  https://ejemplo.com/ventas.json  ', 'https://github.com/x/y/blob/main/a.xlsx?token=abc', 'https://ejemplo.com/a.csv?x=1',
   ];
   for (const u of urls) await prueba(u.trim().slice(0, 90), () => assert.strictEqual(m._normalizarUrlVentas(u), viejo(u)));
 

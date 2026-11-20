@@ -13024,6 +13024,9 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             if (!(Number.isFinite(f.ts) && Number.isFinite(d.ahora))) return false;
             const edad = d.ahora - f.ts;
             if (edad < 0 || edad > SYNC_ARCHIVO_MAX_DIAS * 86400000) return false;
+            // Un usuario que no tiene filas en este archivo (alta reciente, sin ventas) también puede reutilizar:
+            // basta con que haya una copia guardada y que la firma anotara 0 filas.
+            if (d.filas === 0) return d.hayCopia === true && f.filas === 0;
             return d.filas > 0 && f.filas === d.filas;
         }
 
@@ -13734,7 +13737,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             if (!force && cachedSales && cachedSales.length) {
                                 const guardadas = cachedSales.filter(s => s.source === fileObj.type);
                                 const firma = _leerFirmaArchivo(userId, fileObj.type);
-                                if (_puedeReusarArchivo({ forzar: force, firma, filas: guardadas.length, longitud, url: fileObj.url.trim(), usuario: usuarioFirma, ahora: Date.now() })) {
+                                if (_puedeReusarArchivo({ forzar: force, firma, filas: guardadas.length, hayCopia: true, longitud, url: fileObj.url.trim(), usuario: usuarioFirma, ahora: Date.now() })) {
                                     fileObj.maxFecha = firma.maxFecha || '';
                                     for (let i = 0; i < guardadas.length; i++) combinedSales.push(guardadas[i]);
                                     console.info('Sin cambios en el archivo "' + fileObj.type + '": se reutilizan ' + guardadas.length + ' filas guardadas.');
