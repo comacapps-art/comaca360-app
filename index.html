@@ -12870,12 +12870,14 @@ ${JSON.stringify(dataPayload, null, 2)}`;
         });
 
         // Cede el hilo mientras se procesan archivos grandes (ventas) SIN esperar al siguiente cuadro de pantalla.
-        // yieldToBrowser espera a requestAnimationFrame, y con la página en segundo plano, la ventana tapada o minimizada
-        // (o el teléfono con la pantalla apagada u otra app delante) el navegador lo pausa o lo baja a ≈ 1 por segundo: cada
-        // cesión costaba ≈ 1 s o se quedaba esperando, y el archivo del año cede ≈ 250 veces (la sincronización tardaba
-        // minutos y solo avanzaba "sin salirse de la pestaña"). Un mensaje de MessageChannel es una tarea normal del
-        // navegador: no se frena en segundo plano y, entre una tarea y otra, el navegador sigue atendiendo toques y pintando.
-        // yieldToBrowser se conserva para lo que sí necesita que se pinte entre pasos (el avance de la matriz en PDF).
+        // yieldToBrowser espera a requestAnimationFrame, y con la página oculta, la ventana tapada o minimizada el navegador
+        // lo pausa o lo frena mucho (en las pruebas, ≈ 1 cuadro por segundo o ninguno): cada cesión costaba hasta ≈ 1 s o se
+        // quedaba esperando, y el archivo del año cede ≈ 250 veces (la sincronización tardaba minutos y solo avanzaba "sin
+        // salirse de la pestaña"). Un mensaje de MessageChannel es una tarea normal del navegador: no se frena en segundo
+        // plano, y entre una tarea y otra el navegador puede seguir atendiendo toques y pintando (esto último no está medido).
+        // Límites: si el sistema SUSPENDE la página (iPhone al pasar a otra app, pantalla apagada) nada avanza, ni con esto.
+        // yieldToBrowser se conserva para lo que sí necesita que se pinte entre pasos (el avance de la matriz en PDF) y, por
+        // eso, sigue pudiendo frenarse en segundo plano.
         // En Node (pruebas) no hay documento: se usa setTimeout, como antes, y no queda ningún puerto abierto.
         const cederElHilo = (() => {
             if (typeof MessageChannel !== 'undefined' && typeof document !== 'undefined') {
