@@ -12,7 +12,8 @@
     "medicion:memoria": "node --expose-gc herramientas/medicion_ventas/memoria.js herramientas/medicion_ventas/ventas_sint.csv",
     "medicion:datos": "node herramientas/medicion_ventas/gen_csv_sintetico.js 150000 herramientas/medicion_ventas/ventas_sint.csv",
     "medicion:bench": "node --expose-gc herramientas/medicion_ventas/bench.js herramientas/medicion_ventas/ventas_sint.csv",
-    "medicion:paridad": "node herramientas/medicion_ventas/paridad.js"
+    "medicion:paridad": "node herramientas/medicion_ventas/paridad.js",
+    "medicion:descarga": "node herramientas/medicion_ventas/prueba_descarga.js"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",
