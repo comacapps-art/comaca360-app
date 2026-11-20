@@ -26,3 +26,5 @@ herramientas/medicion_ventas/activacion_extraido.js
 herramientas/medicion_ventas/activacion_mutante_*.js
 herramientas/medicion_ventas/cartera_extraido.js
 herramientas/medicion_ventas/cartera_mutante_*.js
+herramientas/medicion_ventas/ceder_extraido.js
+herramientas/medicion_ventas/ceder_mutante_*.js
