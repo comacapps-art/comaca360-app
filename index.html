@@ -15981,6 +15981,21 @@ const GuiaUsuario = ({
 const yieldToBrowser = () => new Promise(resolve => {
   if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(() => resolve());else setTimeout(resolve, 0);
 });
+const cederElHilo = (() => {
+  if (typeof MessageChannel !== 'undefined' && typeof document !== 'undefined') {
+    const canal = new MessageChannel();
+    const esperando = [];
+    canal.port1.onmessage = () => {
+      const seguir = esperando.shift();
+      if (seguir) seguir();
+    };
+    return () => new Promise(resolve => {
+      esperando.push(resolve);
+      canal.port2.postMessage(0);
+    });
+  }
+  return () => new Promise(resolve => setTimeout(resolve, 0));
+})();
 const scheduleHeavyWrite = fn => {
   if (typeof requestIdleCallback !== 'undefined') {
     requestIdleCallback(() => {
@@ -16237,7 +16252,7 @@ async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter)
       if (m) notaFechaVenta(fileObj, m.fecha);
       if (m && (!rowFilter || rowFilter(m))) out.push(m);
     }
-    await yieldToBrowser();
+    await cederElHilo();
   }
   return out;
 }
@@ -16256,7 +16271,7 @@ async function parseJsonSalesChunked(data, sourceType, isCancelled, rowFilter, f
       if (fileObj) notaFechaVenta(fileObj, m.fecha);
       if (!rowFilter || rowFilter(m)) out.push(m);
     }
-    await yieldToBrowser();
+    await cederElHilo();
   }
   return out;
 }
@@ -16398,7 +16413,7 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
     sinceYield += text.length;
     if (sinceYield > 600000) {
       sinceYield = 0;
-      await yieldToBrowser();
+      await cederElHilo();
     }
   }
   decoder.decode(new Uint8Array());
@@ -16436,12 +16451,12 @@ async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
       return await streamCsvSalesRows(res, fileObj, isStale, rowFilter);
     } else {
       const arrayBuffer = await res.arrayBuffer();
-      await yieldToBrowser();
+      await cederElHilo();
       if (!window.XLSX) throw new Error("XLSX no disponible");
       const workbook = window.XLSX.read(new Uint8Array(arrayBuffer), {
         type: 'array'
       });
-      await yieldToBrowser();
+      await cederElHilo();
       const sheetName = workbook.SheetNames[0];
       const excelRows = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
       return await parseExcelRowsChunked(excelRows, fileObj, isStale, rowFilter);
@@ -17008,7 +17023,7 @@ function App() {
       const usuarioFirma = String(currentUser.rol) + '|' + String(currentUser.id);
       for (const fileObj of urls) {
         if (isStale()) return;
-        await yieldToBrowser();
+        await cederElHilo();
         const pesado = fileObj.type === 'currYear' || fileObj.type === 'prevYear';
         let longitud = null;
         if (pesado && navigator.onLine !== false) {
