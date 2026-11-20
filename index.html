@@ -479,6 +479,104 @@ const filtrarCarteraPorEquipo = (cartera, teamIds, teamUsers) => {
     return (teamUsers || []).some(u => (c.vendedorNombre || '').includes(u.id));
   });
 };
+const SIN_VENTAS_DE_EQUIPO = Object.freeze([]);
+const STATS_CARTERA_VACIO = Object.freeze({
+  total: 0,
+  activos: 0,
+  inactivos: 0,
+  cobertura: 0,
+  clientes: Object.freeze([])
+});
+const calcularCarteraStats = ({
+  cartera,
+  sales,
+  currentMonthStr,
+  selectedVendedorCartera,
+  searchCliente,
+  myTeamIds,
+  myTeam
+}) => {
+  if (!cartera) return STATS_CARTERA_VACIO;
+  let filteredCartera = cartera;
+  if (selectedVendedorCartera) {
+    filteredCartera = filtrarCarteraPorVendedor(cartera, selectedVendedorCartera);
+  } else {
+    filteredCartera = filtrarCarteraPorEquipo(cartera, myTeamIds, myTeam);
+  }
+  if (searchCliente) {
+    const searchLower = searchCliente.toLowerCase();
+    filteredCartera = filteredCartera.filter(c => c.cliente && c.cliente.toLowerCase().includes(searchLower) || c.idCliente && c.idCliente.toLowerCase().includes(searchLower));
+  }
+  const currentSales = sales.filter(s => s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr));
+  const memoId = new Map();
+  const idNorm = x => {
+    let v = memoId.get(x);
+    if (v === undefined) {
+      v = normalizeId(x);
+      memoId.set(x, v);
+    }
+    return v;
+  };
+  const porCodigo = new Map(),
+    sinCodigoPorNombre = new Map(),
+    todasPorNombre = new Map();
+  const agregar = (mapa, clave, i) => {
+    const lista = mapa.get(clave);
+    if (lista) lista.push(i);else mapa.set(clave, [i]);
+  };
+  for (let i = 0; i < currentSales.length; i++) {
+    const s = currentSales[i];
+    const cod = idNorm(s.idCliente);
+    if (cod) agregar(porCodigo, cod, i);
+    agregar(todasPorNombre, s.cliente, i);
+    if (!cod) agregar(sinCodigoPorNombre, s.cliente, i);
+    if (s.rawCliente && s.rawCliente !== s.cliente) {
+      agregar(todasPorNombre, s.rawCliente, i);
+      if (!cod) agregar(sinCodigoPorNombre, s.rawCliente, i);
+    }
+  }
+  const mezclar = (a, b) => {
+    const out = new Array(a.length + b.length);
+    let i = 0,
+      j = 0,
+      k = 0;
+    while (i < a.length && j < b.length) out[k++] = a[i] < b[j] ? a[i++] : b[j++];
+    while (i < a.length) out[k++] = a[i++];
+    while (j < b.length) out[k++] = b[j++];
+    return out;
+  };
+  const clientsProcessed = filteredCartera.map(c => {
+    const codC = idNorm(c.idCliente);
+    let posiciones;
+    if (codC) {
+      const porCod = porCodigo.get(codC),
+        porNom = sinCodigoPorNombre.get(c.cliente);
+      posiciones = !porNom ? porCod || [] : !porCod ? porNom : mezclar(porCod, porNom);
+    } else {
+      posiciones = todasPorNombre.get(c.cliente) || [];
+    }
+    const compras = posiciones.map(i => currentSales[i]);
+    const montoTotal = compras.reduce((sum, s) => sum + s.monto, 0);
+    const lastCompra = compras.length > 0 ? compras.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0].fecha : null;
+    return {
+      ...c,
+      status: montoTotal > 0 ? 'Activo' : 'Inactivo',
+      montoMes: montoTotal,
+      ultimaCompra: lastCompra
+    };
+  });
+  const total = clientsProcessed.length;
+  const activos = clientsProcessed.filter(c => c.status === 'Activo').length;
+  const inactivos = total - activos;
+  const cobertura = total > 0 ? activos / total * 100 : 0;
+  return {
+    total,
+    activos,
+    inactivos,
+    cobertura,
+    clientes: clientsProcessed
+  };
+};
 const adjuntarRutaCxc = (cxc, cartera) => {
   if (!Array.isArray(cxc)) return [];
   const buscar = crearBuscadorCartera(cartera);
@@ -14803,7 +14901,11 @@ const GerenteDashboard = ({
     return users.filter(u => u.rol === 'vendedor' && (normalizeId(u.supervisor) === normalizeId(userId) || supervisoresIds.includes(normalizeId(u.supervisor))));
   }, [users, userId, currentUser, filtroSupervisorAdmin]);
   const myTeamIds = useMemo(() => myTeam.map(u => normalizeId(u.id)), [myTeam]);
-  const teamSales = useMemo(() => sales.filter(s => myTeamIds.includes(normalizeId(s.idVendedor))), [sales, myTeamIds]);
+  const teamSales = useMemo(() => {
+    if (!(activeTab === 'cartera' && (subTabCartera === 'activacion' || subTabCartera === 'matriz'))) return SIN_VENTAS_DE_EQUIPO;
+    const ids = new Set(myTeamIds);
+    return sales.filter(s => ids.has(normalizeId(s.idVendedor)));
+  }, [sales, myTeamIds, activeTab, subTabCartera]);
   const teamCartera = useMemo(() => filtrarCarteraPorEquipo(cartera, myTeamIds, myTeam), [cartera, myTeam, myTeamIds]);
   const teamCxc = useMemo(() => {
     if (!cxc || !cartera) return [];
@@ -14814,52 +14916,17 @@ const GerenteDashboard = ({
   const teamRutasCxc = useMemo(() => rutasDeCxc(teamCxc), [teamCxc]);
   const teamCxcFiltrado = useMemo(() => filtrarCxc(teamCxc, cxcSearch, cxcRuta), [teamCxc, cxcSearch, cxcRuta]);
   const carteraStats = useMemo(() => {
-    if (!cartera) return {
-      total: 0,
-      activos: 0,
-      inactivos: 0,
-      cobertura: 0,
-      clientes: []
-    };
-    let filteredCartera = cartera;
-    if (selectedVendedorCartera) {
-      filteredCartera = filtrarCarteraPorVendedor(cartera, selectedVendedorCartera);
-    } else {
-      filteredCartera = filtrarCarteraPorEquipo(cartera, myTeamIds, myTeam);
-    }
-    if (searchCliente) {
-      const searchLower = searchCliente.toLowerCase();
-      filteredCartera = filteredCartera.filter(c => c.cliente && c.cliente.toLowerCase().includes(searchLower) || c.idCliente && c.idCliente.toLowerCase().includes(searchLower));
-    }
-    const currentSales = sales.filter(s => s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr));
-    const clientsProcessed = filteredCartera.map(c => {
-      const codC = normalizeId(c.idCliente);
-      const compras = currentSales.filter(s => {
-        const codS = normalizeId(s.idCliente);
-        if (codC && codS) return codC === codS;
-        return s.cliente === c.cliente || s.rawCliente && s.rawCliente === c.cliente;
-      });
-      const montoTotal = compras.reduce((sum, s) => sum + s.monto, 0);
-      const lastCompra = compras.length > 0 ? compras.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0].fecha : null;
-      return {
-        ...c,
-        status: montoTotal > 0 ? 'Activo' : 'Inactivo',
-        montoMes: montoTotal,
-        ultimaCompra: lastCompra
-      };
+    if (!(activeTab === 'cartera' && subTabCartera === 'resumen')) return STATS_CARTERA_VACIO;
+    return calcularCarteraStats({
+      cartera,
+      sales,
+      currentMonthStr,
+      selectedVendedorCartera,
+      searchCliente,
+      myTeamIds,
+      myTeam
     });
-    const total = clientsProcessed.length;
-    const activos = clientsProcessed.filter(c => c.status === 'Activo').length;
-    const inactivos = total - activos;
-    const cobertura = total > 0 ? activos / total * 100 : 0;
-    return {
-      total,
-      activos,
-      inactivos,
-      cobertura,
-      clientes: clientsProcessed
-    };
-  }, [cartera, selectedVendedorCartera, searchCliente, sales, currentMonthStr, myTeamIds, myTeam]);
+  }, [cartera, selectedVendedorCartera, searchCliente, sales, currentMonthStr, myTeamIds, myTeam, activeTab, subTabCartera]);
   const teamStats = useMemo(() => {
     const currentSales = sales.filter(s => (s.source === 'currMonth' || !s.source && s.fecha && String(s.fecha).startsWith(currentMonthStr)) && myTeamIds.includes(normalizeId(s.idVendedor)));
     let totalMonto = 0;
@@ -14963,7 +15030,7 @@ const GerenteDashboard = ({
     const precioPromedio = totalUnidades > 0 ? totalMonto / totalUnidades : 0;
     const ticketPromedio = totalPedidos > 0 ? totalMonto / totalPedidos : 0;
     const prevMonthStrT = getPreviousMonthStr(currentMonthStr);
-    const prevSalesT = sales.filter(s => myTeamIds.includes(normalizeId(s.idVendedor)) && s.fecha && String(s.fecha).startsWith(prevMonthStrT) && s.source !== 'currMonth');
+    const prevSalesT = sales.filter(s => s.fecha && String(s.fecha).startsWith(prevMonthStrT) && s.source !== 'currMonth' && myTeamIds.includes(normalizeId(s.idVendedor)));
     const prevClientsT = new Set();
     prevSalesT.forEach(s => {
       if (s.monto > 0) prevClientsT.add(s.idCliente);
@@ -16883,7 +16950,7 @@ function App() {
     setVentasHasta(meta && meta.hasta ? meta.hasta : '');
     setCopiaSinGuardar(false);
   }, [currentUser?.id]);
-  const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null, includePrevYear = true) => {
+  const fetchGitHubData = React.useCallback(async (force = false, externalIsStale = null, includePrevYear = true, reutilizarPesados = false) => {
     const isStale = externalIsStale || (() => false);
     if (!appConfig || !currentUser) return;
     const userId = currentUser.id;
@@ -16947,11 +17014,11 @@ function App() {
         if (pesado && navigator.onLine !== false) {
           longitud = await _longitudRemota(fileObj.url);
           if (isStale()) return;
-          if (!force && cachedSales && cachedSales.length) {
+          if ((!force || reutilizarPesados) && cachedSales && cachedSales.length) {
             const guardadas = cachedSales.filter(s => s.source === fileObj.type);
             const firma = _leerFirmaArchivo(userId, fileObj.type);
             if (_puedeReusarArchivo({
-              forzar: force,
+              forzar: force && !reutilizarPesados,
               firma,
               filas: guardadas.length,
               hayCopia: true,
@@ -17025,9 +17092,16 @@ function App() {
       if (!isStale()) setIsFetchingSales(false);
     }
   }, [appConfig, currentUser, getLastSyncBoundary]);
-  const handleManualSync = () => {
-    if (isFetchingSales) return;
-    fetchGitHubData(true);
+  const sincronizandoManualRef = React.useRef(false);
+  const handleManualSync = async evento => {
+    if (isFetchingSales || sincronizandoManualRef.current) return;
+    const completa = !!(evento && (evento.shiftKey || evento.altKey));
+    sincronizandoManualRef.current = true;
+    try {
+      await fetchGitHubData(true, null, completa, !completa);
+    } finally {
+      sincronizandoManualRef.current = false;
+    }
   };
   useEffect(() => {
     let cancelled = false;
@@ -17509,6 +17583,7 @@ function App() {
   }, "Publicar ventas")), React.createElement("button", {
     onClick: handleManualSync,
     disabled: isFetchingSales,
+    title: "Sincronizar ahora (Mayús + clic: descarga completa)",
     className: "text-sm font-bold text-slate-600 bg-white hover:bg-slate-50 border-2 border-slate-200 px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 whitespace-nowrap"
   }, isFetchingSales ? React.createElement(React.Fragment, null, React.createElement("div", {
     className: "w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
