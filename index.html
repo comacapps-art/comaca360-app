@@ -13020,6 +13020,20 @@ ${JSON.stringify(dataPayload, null, 2)}`;
             let pending = '';        // acumulador para detectar el separador en la 1ra línea
             let sinceYield = 0;
 
+            // Una subcadena de V8 o de Safari mantiene vivo el bloque completo del que salió. Con filas
+            // repartidas por todo el archivo (un vendedor), eso retendría casi todo el CSV en memoria. Por eso,
+            // a las filas que SÍ se conservan se les copian las cadenas largas (las cortas ya se copian solas),
+            // y las que se repiten (vendedor, grupo, cliente, artículo...) comparten una sola copia.
+            const copiasUnicas = new Map();
+            const copiaUnica = (v) => {
+                let c = copiasUnicas.get(v);
+                if (c === undefined) { c = (' ' + v).slice(1); copiasUnicas.set(c, c); }
+                return c;
+            };
+            const aplanarFila = (m) => {
+                for (const k in m) { const v = m[k]; if (typeof v === 'string' && v.length >= 13) m[k] = copiaUnica(v); }
+                return m;
+            };
             const finishRow = () => {
                 row.push(field);
                 field = '';
@@ -13032,7 +13046,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 row = [];
                 const m = mapGitHubSalesRow(obj, fileObj);
                 if (m) notaFechaVenta(fileObj, m.fecha);
-                if (m && (!rowFilter || rowFilter(m))) out.push(m);
+                if (m && (!rowFilter || rowFilter(m))) out.push(aplanarFila(m));
             };
 
             const processText = (text) => {

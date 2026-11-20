@@ -16,6 +16,7 @@ La lectura de los archivos de ventas (`mapGitHubSalesRow`, `streamCsvSalesRows`,
 | `npm run medicion:datos` | Crea `ventas_sint.csv` (150.000 filas ≈ 24 MB, inventadas; no se versiona). Para 88 MB: `node herramientas/medicion_ventas/gen_csv_sintetico.js 540000 herramientas/medicion_ventas/ventas_sint.csv`. |
 | `npm run medicion:bench` | Lee ese CSV con la versión congelada y con tu `index.html`, muestra tiempos y comprueba que las filas sean iguales. Añade `--repeticiones 3` para estabilizar. |
 | `npm run medicion:paridad` | ≈ 63.000 casos aleatorios: cabeceras (alias, mayúsculas, tildes, colisiones), formatos de fecha y número, CSV con comillas, saltos CRLF/LF, líneas vacías, filas cortas y largas, cabeceras repetidas, lectura en bloques de 1 byte a 64 KB, con y sin filtro de vendedor; filas de Excel con celdas faltantes; JSON. Compara también `fileObj.maxFecha`. Termina con código 1 si hay una sola diferencia. |
+| `npm run medicion:memoria` | Mide la **memoria retenida** (no solo el tiempo) tras leer el CSV con la versión congelada y con tu `index.html`, en dos casos: administrador (todas las filas) y vendedor (≈ 3 % repartido). Corre antes `node herramientas/medicion_ventas/extraer.js`. Para un archivo realista: `node herramientas/medicion_ventas/gen_csv_sintetico.js 900000 ventas_145mb.csv` y pásalo como argumento de `memoria.js`. |
 
 Con otro módulo en vez del `index.html`: `--candidato ruta.js` (debe exportar las mismas funciones). Ejemplo incluido:
 
@@ -36,7 +37,7 @@ node --expose-gc herramientas/medicion_ventas/bench.js herramientas/medicion_ven
 
 ## Qué NO cubre
 
-- Red, descarga, `saveToCache` / `loadFromCache` (IndexedDB), React ni memoria en iPhone: en un teléfono los tiempos son varias veces mayores. Mide esas partes aparte.
+- Red, descarga, `saveToCache` / `loadFromCache` (IndexedDB), React ni la memoria en un iPhone real (`memoria.js` mide la memoria retenida en Node con V8, que es solo una referencia): en un teléfono los tiempos son varias veces mayores. Mide esas partes aparte.
 - Un BOM UTF-8 al inicio del CSV (deja `ï»¿` pegado a la primera cabecera): es un defecto conocido de la versión actual (guía A9); `paridad.js` no lo prueba para no marcar como error una corrección intencional.
 - El camino de Excel con archivos reales (`XLSX.read`): solo se prueban filas ya convertidas a objetos.
 - Que la lectura sea idéntica no garantiza por sí sola que las pantallas lo sean: compara también los números visibles con los mismos archivos antes de entregar.
