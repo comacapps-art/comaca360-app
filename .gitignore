@@ -22,3 +22,5 @@ herramientas/medicion_ventas/actual_extraido.js
 # La guía técnica describe debilidades de seguridad: este repositorio es público, se entrega por privado
 DOCUMENTACION_TECNICA/
 herramientas/medicion_ventas/actual_extraido_descarga.js
+herramientas/medicion_ventas/activacion_extraido.js
+herramientas/medicion_ventas/activacion_mutante_*.js

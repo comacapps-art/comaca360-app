@@ -764,7 +764,7 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
       cliente: c.cliente || idC
     });
   });
-  const activos = new Map();
+  const acumulado = new Map();
   (sales || []).forEach(s => {
     if (!s || !s.fecha) return;
     if (grupo && s.grupo !== grupo) return;
@@ -775,32 +775,55 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
     if (hasta && fechaStr > hasta) return;
     const monto = Number(s.monto) || 0;
     const cajas = Number(s.cajas) || 0;
-    if (monto <= 0 && cajas <= 0) return;
-    const {
-      key: idVKey
-    } = obtenerRuta(s.idVendedor, s.vendedor);
+    const idVKey = normalizeId(s.idVendedor) || 'S/N';
+    if (monto > 0 || cajas > 0) obtenerRuta(s.idVendedor, s.vendedor);
     const idC = normalizeId(s.idCliente) || s.idCliente || 'S/N';
     const key = idVKey + '||' + idC;
-    if (!activos.has(key)) {
-      activos.set(key, {
+    if (!acumulado.has(key)) {
+      acumulado.set(key, {
         idVendedorKey: idVKey,
         idCliente: s.idCliente || idC,
         cliente: s.cliente || idC,
         monto: 0,
         cajas: 0,
-        ultimaCompra: fechaStr
+        compro: false,
+        ultimaCompra: ''
       });
     }
-    const a = activos.get(key);
+    const a = acumulado.get(key);
     a.monto += monto;
     a.cajas += cajas;
-    if (fechaStr > a.ultimaCompra) a.ultimaCompra = fechaStr;
+    if (monto > 0 || cajas > 0) {
+      if (!a.compro) {
+        a.idCliente = s.idCliente || idC;
+        a.cliente = s.cliente || idC;
+      }
+      a.compro = true;
+      if (fechaStr > a.ultimaCompra) a.ultimaCompra = fechaStr;
+    }
+  });
+  const activos = new Map();
+  acumulado.forEach((a, k) => {
+    if (a.compro) activos.set(k, a);
   });
   const porRuta = [];
   rutas.forEach((r, key) => {
     const clientesActivos = [];
     activos.forEach(a => {
       if (a.idVendedorKey === key) clientesActivos.push(a);
+    });
+    let montoRuta = 0,
+      cajasRuta = 0,
+      devMonto = 0,
+      devCajas = 0;
+    acumulado.forEach(a => {
+      if (a.idVendedorKey !== key) return;
+      montoRuta += a.monto;
+      cajasRuta += a.cajas;
+      if (!a.compro) {
+        devMonto += a.monto;
+        devCajas += a.cajas;
+      }
     });
     const idsActivos = new Set(clientesActivos.map(a => normalizeId(a.idCliente) || a.idCliente));
     const clientesInactivos = Array.from(r.clientes.values()).filter(c => !idsActivos.has(normalizeId(c.idCliente) || c.idCliente));
@@ -811,8 +834,12 @@ const agregarActivacionPorProducto = (sales, cartera, filtros) => {
       idVendedor: r.idVendedor,
       vendedor: r.vendedor,
       clientesActivos: clientesActivos.length,
-      monto: clientesActivos.reduce((s, a) => s + a.monto, 0),
-      cajas: clientesActivos.reduce((s, a) => s + a.cajas, 0),
+      monto: montoRuta,
+      cajas: cajasRuta,
+      devolucionesSinCompra: {
+        monto: devMonto,
+        cajas: devCajas
+      },
       clientes: clientesActivos,
       clientesSinActivar: clientesInactivos.length,
       clientesInactivos
@@ -7663,7 +7690,7 @@ const ActivacionProductoPanel = ({
     className: "text-xs font-black text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-full uppercase tracking-wide"
   }, "Mes en curso: ", formatMonthStr(currentMonthStr))), React.createElement("p", {
     className: "text-slate-500 text-sm font-medium mb-5"
-  }, "Un cliente cuenta como activo si compró algo (monto o cajas) del filtro elegido, dentro del mes en curso."), React.createElement("div", {
+  }, "Un cliente cuenta como activo si compró algo (monto o cajas) del filtro elegido, dentro del mes en curso. Los montos y las cajas ya descuentan las devoluciones, igual que en la pantalla principal de ventas."), React.createElement("div", {
     className: "flex flex-wrap gap-3 items-end"
   }, React.createElement("div", {
     className: "flex flex-col gap-1"
@@ -7857,7 +7884,9 @@ const ActivacionProductoPanel = ({
     }, "Pendiente")))), clientesFiltrados.length === 0 && React.createElement("tr", null, React.createElement("td", {
       colSpan: "5",
       className: "px-4 py-6 text-center text-slate-400"
-    }, busquedaCliente ? 'Ningún cliente coincide con la búsqueda.' : vistaCliente === 'activos' ? 'Nadie activó en esta ruta todavía.' : '¡Toda la cartera de esta ruta está activada!'))))))));
+    }, busquedaCliente ? 'Ningún cliente coincide con la búsqueda.' : vistaCliente === 'activos' ? 'Nadie activó en esta ruta todavía.' : '¡Toda la cartera de esta ruta está activada!'))))), vistaCliente === 'activos' && r.devolucionesSinCompra && (r.devolucionesSinCompra.monto !== 0 || r.devolucionesSinCompra.cajas !== 0) && React.createElement("p", {
+      className: "text-[11px] text-slate-500 mt-2 px-1"
+    }, "El total de la ruta ya descuenta $", money(Math.abs(r.devolucionesSinCompra.monto)), " y ", money(Math.abs(r.devolucionesSinCompra.cajas)), " cajas de devoluciones de clientes sin compras ", hayFiltroProducto ? 'de lo filtrado ' : '', "en esta ruta este mes (esos clientes no salen en esta lista)."))));
   }), resultado.porRuta.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: "6",
     className: "px-6 py-16 text-center text-slate-400"
@@ -15906,22 +15935,77 @@ const scheduleHeavyWrite = fn => {
     }, 0);
   }
 };
-function mapGitHubSalesRow(row, fileObj) {
-  const normalizeKey = key => String(key).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
-  const getVal = keys => {
-    const rowKeys = Object.keys(row);
-    for (let k of keys) {
-      const targetKey = normalizeKey(k);
-      const foundKey = rowKeys.find(rk => normalizeKey(rk) === targetKey);
-      if (foundKey !== undefined) return row[foundKey];
+const _normalizarClave = key => String(key).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+const _ALIAS_VENTAS = {
+  cliente: ['Cliente', 'Client', 'NombreCliente', 'RazonSocial'],
+  articulo: ['Articulo', 'Article', 'Producto', 'Descripcion', 'Item'],
+  fecha: ['Fecha', 'Date', 'Emision', 'Dia'],
+  mes: ['Mes', 'Month'],
+  ano: ['Año', 'Ano', 'Year', 'Ao', 'Aao'],
+  idCliente: ['IdCliente', 'CodigoCliente', 'CodCliente', 'Id Cliente', 'ID_Cliente'],
+  grupo: ['Grupo', 'Subgrupo', 'Linea', 'Marca'],
+  subgrupo: ['Subgrupo', 'Sub Grupo', 'SubGrupo', 'Sub-Grupo', 'SubLinea', 'Sub Linea'],
+  linea: ['Linea', 'Line'],
+  idVendedor: ['IdVendedor', 'CodigoVendedor', 'CodVendedor'],
+  vendedor: ['Vendedor', 'Venedor', 'NombreVendedor'],
+  supervisor: ['Supervisor', 'Gerente'],
+  tipoDoc: ['TipoDoc', 'TipoDocumento', 'Documento'],
+  numero: ['Numero', 'Factura', 'Nro'],
+  cajas: ['Cajas', 'Cj', 'Bultos', 'Caixes'],
+  unidades: ['Unidades', 'Und', 'Piezas', 'Unitats'],
+  monto: ['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import'],
+  kilos: ['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']
+};
+const _ALIAS_VENTAS_NORM = Object.fromEntries(Object.entries(_ALIAS_VENTAS).map(([campo, lista]) => [campo, lista.map(_normalizarClave)]));
+const _columnasPorFirma = new Map();
+let _ultClaves = [];
+let _ultCols = null;
+function _columnasDe(row) {
+  const claves = Object.keys(row);
+  if (_ultCols !== null && claves.length === _ultClaves.length) {
+    let igual = true;
+    for (let i = 0; i < claves.length; i++) {
+      if (claves[i] !== _ultClaves[i]) {
+        igual = false;
+        break;
+      }
     }
-    return undefined;
-  };
-  const clienteVal = String(getVal(['Cliente', 'Client', 'NombreCliente', 'RazonSocial']) || '').trim().toUpperCase();
-  const articuloVal = String(getVal(['Articulo', 'Article', 'Producto', 'Descripcion', 'Item']) || '').trim().toUpperCase();
+    if (igual) return _ultCols;
+  }
+  const firma = claves.join('\u0001');
+  let cols = _columnasPorFirma.get(firma);
+  if (cols) {
+    _ultClaves = claves;
+    _ultCols = cols;
+    return cols;
+  }
+  const norm = claves.map(_normalizarClave);
+  cols = {};
+  for (const campo in _ALIAS_VENTAS_NORM) {
+    let encontrada;
+    for (const t of _ALIAS_VENTAS_NORM[campo]) {
+      const i = norm.indexOf(t);
+      if (i !== -1) {
+        encontrada = claves[i];
+        break;
+      }
+    }
+    cols[campo] = encontrada;
+  }
+  if (_columnasPorFirma.size > 500) _columnasPorFirma.clear();
+  _columnasPorFirma.set(firma, cols);
+  _ultClaves = claves;
+  _ultCols = cols;
+  return cols;
+}
+function mapGitHubSalesRow(row, fileObj) {
+  const cols = _columnasDe(row);
+  const g = c => c === undefined ? undefined : row[c];
+  const clienteVal = String(g(cols.cliente) || '').trim().toUpperCase();
+  const articuloVal = String(g(cols.articulo) || '').trim().toUpperCase();
   if (!clienteVal || !articuloVal) return null;
   if (clienteVal === 'TOTAL' || clienteVal === 'TOTAL GENERAL' || articuloVal === 'TOTAL' || articuloVal === 'TOTAL GENERAL') return null;
-  let fechaVal = getVal(['Fecha', 'Date', 'Emision', 'Dia']);
+  let fechaVal = g(cols.fecha);
   if (fechaVal) {
     if (typeof fechaVal === 'string') {
       let fStr = String(fechaVal).trim().split(' ')[0];
@@ -15952,10 +16036,10 @@ function mapGitHubSalesRow(row, fileObj) {
       const dateObj = new Date(Math.round((fechaVal - 25569) * 86400 * 1000));
       fechaVal = dateObj.toISOString().split('T')[0];
     }
-  } else if (getVal(['Mes', 'Month'])) {
-    const mesNum = parseInt(String(getVal(['Mes', 'Month'])).replace(/[^0-9]/g, ''), 10) || 1;
+  } else if (g(cols.mes)) {
+    const mesNum = parseInt(String(g(cols.mes)).replace(/[^0-9]/g, ''), 10) || 1;
     const mesStr = String(mesNum).padStart(2, '0');
-    let yearVal = getVal(['Año', 'Ano', 'Year', 'Ao', 'Aao']);
+    let yearVal = g(cols.ano);
     let finalYear;
     if (yearVal) {
       finalYear = parseInt(String(yearVal).replace(/[^0-9]/g, ''), 10);
@@ -15973,23 +16057,23 @@ function mapGitHubSalesRow(row, fileObj) {
     source: fileObj.type,
     fecha: fechaVal,
     idCliente: (() => {
-      const rawId = String(getVal(['IdCliente', 'CodigoCliente', 'CodCliente', 'Id Cliente', 'ID_Cliente']) || 'S/N').trim();
+      const rawId = String(g(cols.idCliente) || 'S/N').trim();
       return /^\d+$/.test(rawId) ? rawId.padStart(6, '0') : rawId;
     })(),
     cliente: clienteVal,
-    grupo: String(getVal(['Grupo', 'Subgrupo', 'Linea', 'Marca']) || 'GENERAL').trim().toUpperCase(),
-    subgrupo: String(getVal(['Subgrupo', 'Sub Grupo', 'SubGrupo', 'Sub-Grupo', 'SubLinea', 'Sub Linea']) || '').trim().toUpperCase(),
-    linea: String(getVal(['Linea', 'Line']) || '').trim().toUpperCase(),
-    idVendedor: String(getVal(['IdVendedor', 'CodigoVendedor', 'CodVendedor']) || 'S/N').trim(),
-    vendedor: String(getVal(['Vendedor', 'Venedor', 'NombreVendedor']) || 'Sin Asignar').trim().toUpperCase(),
-    supervisor: String(getVal(['Supervisor', 'Gerente']) || 'Sin Asignar').trim().toUpperCase(),
-    tipoDoc: String(getVal(['TipoDoc', 'TipoDocumento', 'Documento']) || 'FA').trim().toUpperCase(),
-    numero: String(getVal(['Numero', 'Factura', 'Nro']) || 'S/N').trim(),
+    grupo: String(g(cols.grupo) || 'GENERAL').trim().toUpperCase(),
+    subgrupo: String(g(cols.subgrupo) || '').trim().toUpperCase(),
+    linea: String(g(cols.linea) || '').trim().toUpperCase(),
+    idVendedor: String(g(cols.idVendedor) || 'S/N').trim(),
+    vendedor: String(g(cols.vendedor) || 'Sin Asignar').trim().toUpperCase(),
+    supervisor: String(g(cols.supervisor) || 'Sin Asignar').trim().toUpperCase(),
+    tipoDoc: String(g(cols.tipoDoc) || 'FA').trim().toUpperCase(),
+    numero: String(g(cols.numero) || 'S/N').trim(),
     articulo: articuloVal,
-    cajas: parseNum(getVal(['Cajas', 'Cj', 'Bultos', 'Caixes'])),
-    unidades: parseNum(getVal(['Unidades', 'Und', 'Piezas', 'Unitats'])),
-    monto: parseNum(getVal(['Monto', 'Importe', 'Total', 'Venta', 'Neto', 'Import'])),
-    kilos: parseNum(getVal(['Kgs/Lts', 'Kilos/Litros', 'Kilos', 'Kgs', 'Lts', 'Volumen', 'KilosLitros', 'KILOS', 'KGS', 'Kg', 'Lt', 'Kilo', 'Litro', 'KILOS/LITROS', 'KGS/LTS']))
+    cajas: parseNum(g(cols.cajas)),
+    unidades: parseNum(g(cols.unidades)),
+    monto: parseNum(g(cols.monto)),
+    kilos: parseNum(g(cols.kilos))
   };
 }
 function buildVendorFilter(user) {
@@ -16016,6 +16100,65 @@ const fechaMasRecienteDeVentas = archivos => {
   }
   return '';
 };
+const SYNC_ARCHIVO_PREFIX = 'githubArchivoSync_';
+const SYNC_ARCHIVO_VERSION = 1;
+const SYNC_ARCHIVO_MAX_DIAS = 7;
+const _leerFirmaArchivo = (userId, tipo) => {
+  try {
+    const raw = localStorage.getItem(SYNC_ARCHIVO_PREFIX + userId + '_' + tipo);
+    const firma = raw ? JSON.parse(raw) : null;
+    return firma && typeof firma === 'object' ? firma : null;
+  } catch (e) {
+    return null;
+  }
+};
+const _guardarFirmaArchivo = (userId, tipo, firma) => {
+  try {
+    localStorage.setItem(SYNC_ARCHIVO_PREFIX + userId + '_' + tipo, JSON.stringify(firma));
+  } catch (e) {
+    console.warn(e);
+  }
+};
+function _normalizarUrlVentas(url) {
+  let rawUrl = String(url).trim();
+  if (rawUrl.includes('github.com')) {
+    if (rawUrl.includes('/blob/')) {
+      rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+    } else if (rawUrl.includes('/raw/')) {
+      rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/');
+    }
+  }
+  return rawUrl;
+}
+async function _longitudRemota(url, esperaMs) {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const reloj = ctrl ? setTimeout(() => ctrl.abort(), esperaMs || 8000) : null;
+  try {
+    const u = _normalizarUrlVentas(url);
+    const res = await fetch(u + (u.includes('?') ? '&' : '?') + 't=' + new Date().getTime(), {
+      method: 'HEAD',
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    if (!res.ok) return null;
+    const n = Number(res.headers.get('content-length'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch (e) {
+    return null;
+  } finally {
+    if (reloj) clearTimeout(reloj);
+  }
+}
+function _puedeReusarArchivo(d) {
+  if (!d || d.forzar || !d.firma) return false;
+  const f = d.firma;
+  if (f.v !== SYNC_ARCHIVO_VERSION || f.url !== d.url || f.usuario !== d.usuario) return false;
+  if (!(Number.isFinite(d.longitud) && d.longitud > 0 && f.len === d.longitud)) return false;
+  if (!(Number.isFinite(f.ts) && Number.isFinite(d.ahora))) return false;
+  const edad = d.ahora - f.ts;
+  if (edad < 0 || edad > SYNC_ARCHIVO_MAX_DIAS * 86400000) return false;
+  if (d.filas === 0) return d.hayCopia === true && f.filas === 0;
+  return d.filas > 0 && f.filas === d.filas;
+}
 async function parseExcelRowsChunked(excelRows, fileObj, isCancelled, rowFilter) {
   const out = [];
   const CHUNK = 1200;
@@ -16061,6 +16204,22 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
   let pendingQuote = false;
   let pending = '';
   let sinceYield = 0;
+  const copiasUnicas = new Map();
+  const copiaUnica = v => {
+    let c = copiasUnicas.get(v);
+    if (c === undefined) {
+      c = (' ' + v).slice(1);
+      copiasUnicas.set(c, c);
+    }
+    return c;
+  };
+  const aplanarFila = m => {
+    for (const k in m) {
+      const v = m[k];
+      if (typeof v === 'string' && v.length >= 13) m[k] = copiaUnica(v);
+    }
+    return m;
+  };
   const finishRow = () => {
     row.push(field);
     field = '';
@@ -16080,13 +16239,14 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
     row = [];
     const m = mapGitHubSalesRow(obj, fileObj);
     if (m) notaFechaVenta(fileObj, m.fecha);
-    if (m && (!rowFilter || rowFilter(m))) out.push(m);
+    if (m && (!rowFilter || rowFilter(m))) out.push(aplanarFila(m));
   };
   const processText = text => {
     let i = 0;
+    const n = text.length;
     if (pendingQuote) {
       pendingQuote = false;
-      if (text.length === 0) {
+      if (n === 0) {
         pendingQuote = true;
         return;
       }
@@ -16095,22 +16255,42 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
         i = 1;
       } else inQuotes = false;
     }
-    for (; i < text.length; i++) {
-      const char = text[i];
+    const sepCode = separator.charCodeAt(0);
+    while (i < n) {
       if (inQuotes) {
-        if (char === '"') {
-          if (i + 1 < text.length) {
-            if (text[i + 1] === '"') {
-              field += '"';
-              i++;
-            } else inQuotes = false;
-          } else pendingQuote = true;
-        } else field += char;
+        const q = text.indexOf('"', i);
+        if (q === -1) {
+          field += text.slice(i);
+          i = n;
+          break;
+        }
+        field += text.slice(i, q);
+        if (q + 1 < n) {
+          if (text.charCodeAt(q + 1) === 34) {
+            field += '"';
+            i = q + 2;
+          } else {
+            inQuotes = false;
+            i = q + 1;
+          }
+        } else {
+          pendingQuote = true;
+          i = n;
+        }
       } else {
-        if (char === '"') inQuotes = true;else if (char === separator) {
+        const start = i;
+        let c = 0;
+        for (; i < n; i++) {
+          c = text.charCodeAt(i);
+          if (c === 34 || c === sepCode || c === 10 || c === 13) break;
+        }
+        if (i > start) field += text.slice(start, i);
+        if (i >= n) break;
+        if (c === 34) inQuotes = true;else if (c === sepCode) {
           row.push(field);
           field = '';
-        } else if (char === '\n') finishRow();else if (char === '\r') {} else field += char;
+        } else if (c === 10) finishRow();
+        i++;
       }
     }
   };
@@ -16167,14 +16347,7 @@ async function streamCsvSalesRows(res, fileObj, isCancelled, rowFilter) {
   return out;
 }
 async function fetchGithubSalesFile(fileObj, isStale, rowFilter) {
-  let rawUrl = fileObj.url.trim();
-  if (rawUrl.includes('github.com')) {
-    if (rawUrl.includes('/blob/')) {
-      rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
-    } else if (rawUrl.includes('/raw/')) {
-      rawUrl = rawUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/', '/');
-    }
-  }
+  let rawUrl = _normalizarUrlVentas(fileObj.url);
   const url = rawUrl + (rawUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
   const urlLower = url.toLowerCase();
   try {
@@ -16764,13 +16937,49 @@ function App() {
     try {
       const rowFilter = buildVendorFilter(currentUser);
       const combinedSales = includePrevYear ? [] : (cachedSales || []).filter(s => s.source === 'prevYear');
+      const firmasNuevas = {};
+      const usuarioFirma = String(currentUser.rol) + '|' + String(currentUser.id);
       for (const fileObj of urls) {
         if (isStale()) return;
         await yieldToBrowser();
+        const pesado = fileObj.type === 'currYear' || fileObj.type === 'prevYear';
+        let longitud = null;
+        if (pesado && navigator.onLine !== false) {
+          longitud = await _longitudRemota(fileObj.url);
+          if (isStale()) return;
+          if (!force && cachedSales && cachedSales.length) {
+            const guardadas = cachedSales.filter(s => s.source === fileObj.type);
+            const firma = _leerFirmaArchivo(userId, fileObj.type);
+            if (_puedeReusarArchivo({
+              forzar: force,
+              firma,
+              filas: guardadas.length,
+              hayCopia: true,
+              longitud,
+              url: fileObj.url.trim(),
+              usuario: usuarioFirma,
+              ahora: Date.now()
+            })) {
+              fileObj.maxFecha = firma.maxFecha || '';
+              for (let i = 0; i < guardadas.length; i++) combinedSales.push(guardadas[i]);
+              console.info('Sin cambios en el archivo "' + fileObj.type + '": se reutilizan ' + guardadas.length + ' filas guardadas.');
+              continue;
+            }
+          }
+        }
         const part = await fetchGithubSalesFile(fileObj, isStale, rowFilter);
         for (let i = 0; i < part.length; i++) {
           combinedSales.push(part[i]);
         }
+        if (pesado && longitud) firmasNuevas[fileObj.type] = {
+          v: SYNC_ARCHIVO_VERSION,
+          url: fileObj.url.trim(),
+          len: longitud,
+          usuario: usuarioFirma,
+          ts: Date.now(),
+          maxFecha: fileObj.maxFecha || '',
+          filas: part.length
+        };
       }
       if (isStale()) return;
       startSalesTransition(() => setSalesData(combinedSales));
@@ -16798,12 +17007,15 @@ function App() {
       }
       scheduleHeavyWrite(async () => {
         const guardada = await saveToCache(cacheKey, combinedSales);
-        if (guardada) guardarMetaSync(userId, {
-          ts: now.getTime(),
-          version: versionPublicada,
-          dateStr,
-          hasta
-        });
+        if (guardada) {
+          guardarMetaSync(userId, {
+            ts: now.getTime(),
+            version: versionPublicada,
+            dateStr,
+            hasta
+          });
+          for (const tipo of Object.keys(firmasNuevas)) _guardarFirmaArchivo(userId, tipo, firmasNuevas[tipo]);
+        }
         if (idUsuarioSyncRef.current === userId) setCopiaSinGuardar(!guardada);
       });
     } catch (err) {
