@@ -28,7 +28,7 @@ const { execFileSync } = require('child_process');
 
 const SALIDA = path.join(__dirname, 'visitas_extraido.js');
 const INDEX = path.join(__dirname, '..', '..', 'index.html');
-const FUNCIONES = ['diaLocal', 'horaCorta', 'escaparHtml', 'RESULTADOS_VISITA', 'resultadoVisita', 'obtenerUbicacionVisita',
+const FUNCIONES = ['diaLocal', 'horaCorta', 'escaparHtml', 'RESULTADOS_VISITA', 'resultadoVisita', 'obtenerUbicacionVisita', 'obtenerUbicacionVisitaConReintento',
   'EVENTO_COLA_VISITAS', 'PREFIJO_COLA_VISITAS', 'claveColaVisitas', 'leerColaVisitas', 'guardarColaVisitas', 'quitarDeColaVisitas',
   'vendedoresConColaVisitas', 'UMBRAL_LEJOS_METROS', 'PRECISION_MAXIMA_REFERENCIA', 'MARCAS_DIACRITICAS', 'textoParaClave', 'resumenCorto',
   'claveClienteVisita', 'etiquetaClienteVisita', 'puntoValido', 'distanciaMetros', 'evaluarDistanciaVisita', 'resumenVerificacion',
@@ -487,6 +487,37 @@ const bateria = async (codigo, mostrar) => {
     respuestaTardia({ coords: { latitude: 1, longitude: 2, accuracy: 3 } }); // una respuesta tardía no debe romper nada
   });
 
+  await prueba('el GPS en frío se reintenta UNA vez (tiempo agotado o posición no disponible), no así el permiso denegado', async () => {
+    const { M } = nuevo();
+    const poner = (geo) => Object.defineProperty(globalThis, 'navigator', { value: geo, configurable: true, writable: true });
+    const ok = { coords: { latitude: 10.5, longitude: -66.9, accuracy: 9 } };
+    // primer intento sin respuesta (tiempo agotado), el segundo responde
+    let llamadas = 0; let avisos = 0;
+    poner({ geolocation: { getCurrentPosition: (res) => { llamadas++; if (llamadas === 2) res(ok); } } });
+    const u = await M.obtenerUbicacionVisitaConReintento(10, () => { avisos++; });
+    assert.strictEqual(u.precision, 9);
+    assert.strictEqual(llamadas, 2);
+    assert.strictEqual(avisos, 1, 'avisa una vez que reintenta');
+    // posición no disponible (2) y luego responde
+    llamadas = 0;
+    poner({ geolocation: { getCurrentPosition: (res, err) => { llamadas++; if (llamadas === 1) err({ code: 2 }); else res(ok); } } });
+    assert.strictEqual((await M.obtenerUbicacionVisitaConReintento(10)).precision, 9);
+    assert.strictEqual(llamadas, 2);
+    // permiso denegado (1): no se reintenta
+    llamadas = 0;
+    poner({ geolocation: { getCurrentPosition: (res, err) => { llamadas++; err({ code: 1 }); } } });
+    await assert.rejects(M.obtenerUbicacionVisitaConReintento(10), (e) => e.code === 1);
+    assert.strictEqual(llamadas, 1, 'permiso denegado: un solo intento');
+    // no soportado (0): no se reintenta
+    poner({});
+    await assert.rejects(M.obtenerUbicacionVisitaConReintento(10), (e) => e.code === 0);
+    // dos fallos seguidos: rinde con el último error y solo dos intentos
+    llamadas = 0;
+    poner({ geolocation: { getCurrentPosition: () => { llamadas++; } } });
+    await assert.rejects(M.obtenerUbicacionVisitaConReintento(10), (e) => e.code === 3);
+    assert.strictEqual(llamadas, 2, 'solo un reintento');
+  });
+
   await prueba('textos del mapa escapados y resultados conocidos', async () => {
     const { M } = nuevo();
     assert.strictEqual(M.escaparHtml(`<b onclick="x">'&`), '&lt;b onclick=&quot;x&quot;&gt;&#39;&amp;');
@@ -519,6 +550,7 @@ const estatico = () => {
   const iMarcar = html.indexOf('const marcar = async () => {');
   const marcarTxt = iMarcar >= 0 ? html.slice(iMarcar, html.indexOf('const precisionTexto', iMarcar)) : '';
   chequear('marcar una visita lejos del cliente NO se bloquea (la alerta es solo en el tablero)', marcarTxt.length > 100 && !/distanciaMetros|evaluarDistanciaVisita|UMBRAL_LEJOS/.test(marcarTxt));
+  chequear('marcar usa el GPS con reintento y avisa mientras reintenta', marcarTxt.includes('obtenerUbicacionVisitaConReintento(15000, () => setEstadoGuardado('));
   chequear('cliente nuevo: botón, formulario, cruce con la cartera sin tildes y marca en la visita',
     html.includes('Cliente nuevo (no está en mi cartera)') && html.includes('clienteNuevo: !!cliente.nuevo,') && html.includes('textoParaClave(c.cliente) === textoParaClave(nombreNuevo)'));
   chequear('solo el administrador valida alertas y corrige la ubicación', html.includes("const esAdmin = currentUser.rol === 'admin';") && /\{esAdmin && \(\s+<div className="flex gap-2 shrink-0">\s+<button onClick=\{\(\) => validar\(v\)\}[\s\S]{0,400}ubicarClienteAqui\(v\)/.test(html));
@@ -580,6 +612,8 @@ const estatico = () => {
     ['visita mal formada sin textos', cambiar('vendedorNombre: txt(base.vendedorNombre),', '')],
     ['validar sin decir quién', cambiar('por: String(usuario.id), ', '')],
     ['GPS sin tiempo de espera propio', cambiar('temporizador = setTimeout(', 'temporizador = null && setTimeout(')],
+    ['el GPS no se reintenta', cambiar('if (!err || (err.code !== 2 && err.code !== 3)) throw err;', 'throw err;')],
+    ['el GPS se reintenta aunque el permiso esté denegado', cambiar('if (!err || (err.code !== 2 && err.code !== 3)) throw err;', 'if (!err) throw err;')],
     ['GPS sin código de error de permiso', cambiar('err => fin(reject, err),', 'err => fin(reject, new Error("x")),')]
   ];
   let detectados = 0;

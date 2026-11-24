@@ -1420,6 +1420,19 @@
             );
         });
 
+        // El primer GPS en frío (sobre todo bajo techo) puede tardar más que el tiempo de espera; la segunda vez suele
+        // responder enseguida. Si el primer intento da "posición no disponible" (2) o "tiempo agotado" (3), se reintenta
+        // UNA vez antes de avisar. Un permiso denegado (1) o "no soportado" (0) no se reintenta.
+        const obtenerUbicacionVisitaConReintento = async (timeoutMs = 15000, alReintentar) => {
+            try {
+                return await obtenerUbicacionVisita(timeoutMs);
+            } catch (err) {
+                if (!err || (err.code !== 2 && err.code !== 3)) throw err;
+                if (alReintentar) alReintentar();
+                return obtenerUbicacionVisita(timeoutMs);
+            }
+        };
+
         const EVENTO_COLA_VISITAS = 'comaca-cola-visitas';
         const PREFIJO_COLA_VISITAS = 'comaca_visitas_pendientes_';
         const claveColaVisitas = (vendedorId) => `${PREFIJO_COLA_VISITAS}${String(vendedorId)}`;
@@ -1748,12 +1761,12 @@
                 setEstadoGuardado('Obteniendo ubicación GPS...');
                 let ubicacion;
                 try {
-                    ubicacion = await obtenerUbicacionVisita();
+                    ubicacion = await obtenerUbicacionVisitaConReintento(15000, () => setEstadoGuardado('Buscando señal GPS... un momento'));
                 } catch (err) {
                     console.warn('Sin ubicación para la visita', err);
                     const codigo = err && err.code;
                     openModal('alert', null, 'Sin ubicación', codigo === 1
-                        ? 'La app no tiene permiso para usar la ubicación. Actívalo en el navegador (ícono del candado junto a la dirección) y vuelve a intentar.'
+                        ? 'No se pudo usar la ubicación. Verifica que la ubicación del teléfono esté activada y que el navegador tenga permiso (ícono del candado junto a la dirección), y vuelve a intentar.'
                         : codigo === 2
                             ? 'El teléfono no pudo determinar dónde estás. Verifica que la ubicación esté activa, sal a un lugar abierto y vuelve a intentar.'
                             : codigo === 3
