@@ -137,7 +137,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-        import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites } from 'firebase/firestore';
+        import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction } from 'firebase/firestore';
         import {
             LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle,
             PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart,
@@ -1357,6 +1357,874 @@
 
 
         // --- MAPA DE ZONAS (NUEVO COMPONENTE ADMIN) ---
+        // Fondo de los mapas. CARTO (el que se usaba) dejó de servir mapas sin clave: devuelve
+        // cuadros que dicen "API KEY REQUIRED". OpenStreetMap los sirve sin clave para un uso
+        // tan pequeño como este, siempre que se muestre su atribución.
+        const agregarFondoMapa = (mapa) => window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(mapa);
+
+        // --- VISITAS A CLIENTES (BIT-011) ---
+        // El vendedor marca la visita a un cliente de su cartera y la app guarda fecha, hora,
+        // resultado, nota y la ubicación del teléfono EN ESE MOMENTO (no hay seguimiento
+        // continuo). Cada pedido enviado también deja su visita (origen 'pedido').
+        //
+        // Sin señal: la visita entra primero a una cola en el teléfono (localStorage) y se
+        // envía con un id fijo, así que reintentar no la duplica. La cola sobrevive a cerrar
+        // la app; se reintenta al abrirla, al volver la señal y cada 2 minutos.
+        const RESULTADOS_VISITA = [
+            { id: 'vendio', label: 'Vendió', color: '#16a34a', clase: 'bg-green-100 text-green-700' },
+            { id: 'no-compro', label: 'No compró', color: '#ea580c', clase: 'bg-orange-100 text-orange-700' },
+            { id: 'cerrado', label: 'Cerrado / no estaba', color: '#64748b', clase: 'bg-slate-200 text-slate-700' },
+            { id: 'cobro', label: 'Cobro', color: '#2563eb', clase: 'bg-blue-100 text-blue-700' },
+            { id: 'otro', label: 'Otro', color: '#9333ea', clase: 'bg-purple-100 text-purple-700' }
+        ];
+        const resultadoVisita = (id) => RESULTADOS_VISITA.find(r => r.id === id) || RESULTADOS_VISITA[RESULTADOS_VISITA.length - 1];
+
+        // Día en la hora del teléfono (AAAA-MM-DD). toISOString() daría el día de Greenwich:
+        // en Venezuela, desde las 8 de la noche ya sería "mañana".
+        const diaLocal = (fecha = new Date()) => {
+            const d = fecha instanceof Date ? fecha : new Date(fecha);
+            if (isNaN(d.getTime())) return '';
+            const dos = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+        };
+        const horaCorta = (fecha) => {
+            const d = new Date(fecha);
+            return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' });
+        };
+        const escaparHtml = (v) => String(v === undefined || v === null ? '' : v)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+        // Ubicación actual con su precisión en metros (lo que el teléfono dice que puede errar). Además del tiempo
+        // de espera del navegador (que no corre mientras se espera la respuesta al permiso) tiene el suyo. Los
+        // errores llevan code: 1 permiso denegado, 2 posición no disponible, 3 tiempo agotado, 0 no soportado.
+        const obtenerUbicacionVisita = (timeoutMs = 15000) => new Promise((resolve, reject) => {
+            if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+                reject(Object.assign(new Error('Geolocalización no soportada.'), { code: 0 }));
+                return;
+            }
+            let terminado = false;
+            let temporizador = null;
+            const fin = (accion, valor) => { if (terminado) return; terminado = true; clearTimeout(temporizador); accion(valor); };
+            temporizador = setTimeout(() => fin(reject, Object.assign(new Error('Tiempo agotado esperando la ubicación.'), { code: 3 })), Math.round(timeoutMs * 1.3));
+            navigator.geolocation.getCurrentPosition(
+                p => fin(resolve, {
+                    lat: p.coords.latitude,
+                    lng: p.coords.longitude,
+                    precision: Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : null
+                }),
+                err => fin(reject, err),
+                { timeout: timeoutMs, enableHighAccuracy: true, maximumAge: 30000 }
+            );
+        });
+
+        // El primer GPS en frío (sobre todo bajo techo) puede tardar más que el tiempo de espera; la segunda vez suele
+        // responder enseguida. Si el primer intento da "posición no disponible" (2) o "tiempo agotado" (3), se reintenta
+        // UNA vez antes de avisar. Un permiso denegado (1) o "no soportado" (0) no se reintenta.
+        const obtenerUbicacionVisitaConReintento = async (timeoutMs = 15000, alReintentar) => {
+            try {
+                return await obtenerUbicacionVisita(timeoutMs);
+            } catch (err) {
+                if (!err || (err.code !== 2 && err.code !== 3)) throw err;
+                if (alReintentar) alReintentar();
+                return obtenerUbicacionVisita(timeoutMs);
+            }
+        };
+
+        const EVENTO_COLA_VISITAS = 'comaca-cola-visitas';
+        const PREFIJO_COLA_VISITAS = 'comaca_visitas_pendientes_';
+        const claveColaVisitas = (vendedorId) => `${PREFIJO_COLA_VISITAS}${String(vendedorId)}`;
+        const leerColaVisitas = (vendedorId) => {
+            try {
+                const lista = JSON.parse(localStorage.getItem(claveColaVisitas(vendedorId)) || '[]');
+                return Array.isArray(lista) ? lista.filter(v => v && v.id) : [];
+            } catch (e) { return []; }
+        };
+        // Devuelve true si pudo guardar en el teléfono (false si el almacenamiento está lleno o bloqueado).
+        const guardarColaVisitas = (vendedorId, lista) => {
+            let guardada = true;
+            try {
+                if (lista.length === 0) localStorage.removeItem(claveColaVisitas(vendedorId));
+                else localStorage.setItem(claveColaVisitas(vendedorId), JSON.stringify(lista));
+            } catch (e) { guardada = false; }
+            try { window.dispatchEvent(new Event(EVENTO_COLA_VISITAS)); } catch (e) {}
+            return guardada;
+        };
+        const quitarDeColaVisitas = (vendedorId, id) => {
+            const lista = leerColaVisitas(vendedorId);
+            const resto = lista.filter(v => v.id !== id);
+            if (resto.length !== lista.length) guardarColaVisitas(vendedorId, resto);
+        };
+        // Vendedores que tienen visitas pendientes guardadas en ESTE teléfono (puede haber más de uno si
+        // otra persona entró después con el mismo equipo).
+        const vendedoresConColaVisitas = () => {
+            const ids = [];
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith(PREFIJO_COLA_VISITAS)) ids.push(k.slice(PREFIJO_COLA_VISITAS.length));
+                }
+            } catch (e) {}
+            return ids;
+        };
+
+        // --- Ubicación del cliente y alerta de distancia (BIT-011) ---
+        // La dueña pidió no impedir marcar lejos del cliente: la visita se guarda igual y, si quedó a más de
+        // 50 m, aparece una alerta en el tablero para que el administrador la valide. La cartera no trae
+        // coordenadas, así que la primera visita MANUAL con GPS aceptable fija la ubicación del cliente
+        // (colección clientesUbicacion); el administrador la puede corregir desde la alerta. Un cliente nuevo
+        // se identifica por su vendedor y su nombre ("N-" + vendedor + nombre sin tildes ni símbolos): así sus
+        // visitas siguientes encuentran la misma ubicación y dos vendedores con un cliente del mismo nombre no
+        // se pisan.
+        const UMBRAL_LEJOS_METROS = 50;
+        const PRECISION_MAXIMA_REFERENCIA = 100;
+        const MARCAS_DIACRITICAS = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']', 'g');
+
+        // Texto en minúsculas, sin tildes ni símbolos y separado por guiones.
+        const textoParaClave = (t) => String(t === undefined || t === null ? '' : t).normalize('NFD').replace(MARCAS_DIACRITICAS, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const resumenCorto = (t) => { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36); };
+
+        const claveClienteVisita = (clienteId, clienteNombre, vendedorId) => {
+            const id = String(clienteId === undefined || clienteId === null ? '' : clienteId).trim();
+            if (/^N-/.test(id)) return id.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 120);
+            if (id && id !== 'S/N') {
+                const n = normalizeId(id);
+                if (n) return n;
+            }
+            const slug = textoParaClave(clienteNombre);
+            if (!slug) return '';
+            const vend = normalizeId(vendedorId);
+            const cuerpo = slug.length > 48 ? slug.slice(0, 48) + '-' + resumenCorto(slug) : slug;
+            return 'N-' + (vend ? vend + '-' : '') + cuerpo;
+        };
+
+        const etiquetaClienteVisita = (v) => (v && v.clienteNuevo) ? 'Nuevo' : ((v && v.clienteId) || 'S/N');
+
+        const puntoValido = (u) => !!u && Number.isFinite(u.lat) && Number.isFinite(u.lng);
+
+        // Distancia en metros entre dos puntos {lat, lng} (fórmula de haversine).
+        const distanciaMetros = (a, b) => {
+            const rad = (g) => g * Math.PI / 180;
+            const dLat = rad(b.lat - a.lat);
+            const dLng = rad(b.lng - a.lng);
+            const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+            return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+        };
+
+        // "lejos" solo si, aun descontando el margen de error del GPS de la visita (hasta 100 m), sigue pasando
+        // de 50 m: así no se señala a nadie por la imprecisión del teléfono.
+        const evaluarDistanciaVisita = (visita, ref) => {
+            if (!visita || !puntoValido(visita.ubicacion)) return { estado: 'sin-gps' };
+            if (!ref || !puntoValido(ref)) return { estado: 'sin-referencia' };
+            if (ref.visitaId && ref.visitaId === visita.id) return { estado: 'es-referencia' };
+            const metros = Math.round(distanciaMetros(visita.ubicacion, ref));
+            const margen = Math.min(Number.isFinite(visita.ubicacion.precision) ? visita.ubicacion.precision : 0, PRECISION_MAXIMA_REFERENCIA);
+            return { estado: metros > UMBRAL_LEJOS_METROS + margen ? 'lejos' : 'cerca', metros, margen };
+        };
+
+        // Cuántas visitas hay en cada estado de verificación (para que el administrador sepa cuáles NO se
+        // pudieron comparar con la ubicación del cliente).
+        const resumenVerificacion = (evaluadas) => {
+            const c = { cerca: 0, lejos: 0, referencia: 0, sinReferencia: 0, sinGps: 0 };
+            (evaluadas || []).forEach(x => {
+                const e = x && x.ev && x.ev.estado;
+                if (e === 'cerca') c.cerca++;
+                else if (e === 'lejos') c.lejos++;
+                else if (e === 'es-referencia') c.referencia++;
+                else if (e === 'sin-referencia') c.sinReferencia++;
+                else c.sinGps++;
+            });
+            return c;
+        };
+
+        const visitaValidada = (v) => !!(v && v.revision && v.revision.estado === 'validada');
+        const datosRevisionVisita = (usuario, ahora = new Date()) => ({
+            revision: { estado: 'validada', por: String(usuario.id), fecha: ahora.toISOString() }
+        });
+        const datosUbicacionAdministrador = (v, usuario, ahora = new Date()) => ({
+            clienteId: v.clienteId || '',
+            clienteNombre: v.clienteNombre || '',
+            lat: v.ubicacion.lat,
+            lng: v.ubicacion.lng,
+            precision: Number.isFinite(v.ubicacion.precision) ? v.ubicacion.precision : null,
+            visitaId: v.id,
+            fuente: 'administrador',
+            fecha: ahora.toISOString(),
+            fijadaPor: String(usuario.id)
+        });
+
+        // ¿Es esta visita de alguien que el usuario puede ver? Administrador: todo. Gerente: sus vendedores
+        // directos o los de los gerentes que le reportan (la misma regla del mapa de pedidos).
+        const visitaEsDeMiEquipo = (vendedorId, users, currentUser) => {
+            if (!currentUser) return false;
+            if (currentUser.rol === 'admin') return true;
+            const yo = normalizeId(currentUser.id);
+            if (normalizeId(vendedorId) === yo) return true;
+            const lista = users || [];
+            const v = lista.find(u => normalizeId(u.id) === normalizeId(vendedorId));
+            if (!v) return false;
+            const jefe = normalizeId(v.supervisor);
+            if (jefe === yo) return true;
+            return lista.some(u => u.rol === 'gerente' && normalizeId(u.supervisor) === yo && normalizeId(u.id) === jefe);
+        };
+
+        // Día AAAA-MM-DD restando n días (en la hora del teléfono).
+        const restarDiasVisita = (dia, n) => {
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dia || ''));
+            if (!m) return '';
+            return diaLocal(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - n));
+        };
+
+        // Una visita leída de la base: los textos siempre como texto y la ubicación solo si es válida (un documento
+        // raro no debe tumbar la pantalla del administrador).
+        const limpiarVisitaLeida = (v) => {
+            const txt = (x) => (x === undefined || x === null) ? '' : String(x);
+            const base = (v && typeof v === 'object') ? v : {};
+            const u = base.ubicacion;
+            return {
+                ...base,
+                id: txt(base.id),
+                vendedorId: txt(base.vendedorId),
+                vendedorNombre: txt(base.vendedorNombre),
+                clienteId: txt(base.clienteId),
+                clienteNombre: txt(base.clienteNombre),
+                ciudad: txt(base.ciudad),
+                nota: txt(base.nota),
+                resultado: txt(base.resultado),
+                dia: txt(base.dia),
+                fecha: txt(base.fecha),
+                ubicacion: puntoValido(u) ? { lat: u.lat, lng: u.lng, precision: Number.isFinite(u.precision) ? u.precision : null } : null
+            };
+        };
+
+        // Fija la ubicación del cliente con esta visita si todavía no tiene una (y el GPS fue razonable).
+        // Solo las visitas MANUALES la fijan (un pedido puede enviarse desde la oficina). Nunca pisa una
+        // ubicación existente y lo hace en una transacción, para que dos visitas a la vez no se pisen.
+        // Devuelve true si la creó.
+        const asegurarUbicacionCliente = async (visita) => {
+            if (visita.origen === 'pedido') return false;
+            const u = visita.ubicacion;
+            const clave = claveClienteVisita(visita.clienteId, visita.clienteNombre, visita.vendedorId);
+            if (!clave || !puntoValido(u)) return false;
+            if (Number.isFinite(u.precision) && u.precision > PRECISION_MAXIMA_REFERENCIA) return false;
+            const ref = doc(db, getCollectionPath('clientesUbicacion'), clave);
+            return runTransaction(db, async (tx) => {
+                const existente = await tx.get(ref);
+                if (existente.exists()) return false;
+                tx.set(ref, {
+                    clienteId: visita.clienteId || '',
+                    clienteNombre: visita.clienteNombre || '',
+                    lat: u.lat,
+                    lng: u.lng,
+                    precision: Number.isFinite(u.precision) ? u.precision : null,
+                    visitaId: visita.id,
+                    fuente: 'primera-visita',
+                    fecha: visita.fecha,
+                    fijadaPor: String(visita.vendedorId)
+                });
+                return true;
+            });
+        };
+
+        const visitasEnVuelo = new Map(); // id de la visita -> promesa que dice si el servidor la confirmó
+        // Escribe la visita con su id fijo (merge: un reintento no borra, por ejemplo, la validación del
+        // administrador). Devuelve true SOLO si el servidor confirmó antes de timeoutMs; si no, la visita sigue
+        // en la cola y se quitará sola cuando la confirmación llegue. Con timeoutMs 0 no espera.
+        const enviarVisita = (visita, timeoutMs = 12000) => {
+            const { id, ...datos } = visita;
+            let envio = visitasEnVuelo.get(id);
+            if (!envio) {
+                envio = setDoc(doc(db, getCollectionPath('visitas'), id), { ...datos, enviadaEn: serverTimestamp() }, { merge: true })
+                    .then(() => {
+                        quitarDeColaVisitas(visita.vendedorId, id);
+                        asegurarUbicacionCliente(visita).catch(err => console.warn('No se fijó la ubicación del cliente', err));
+                        return true;
+                    })
+                    .catch(err => { console.warn('Visita sin enviar todavía', err); return false; })
+                    .finally(() => visitasEnVuelo.delete(id));
+                visitasEnVuelo.set(id, envio);
+            }
+            if (!(timeoutMs > 0)) return envio;
+            let temporizador;
+            const espera = new Promise(resolve => { temporizador = setTimeout(() => resolve(false), timeoutMs); });
+            return Promise.race([envio, espera]).finally(() => clearTimeout(temporizador));
+        };
+
+        const nuevaIdVisita = () => doc(collection(db, getCollectionPath('visitas'))).id;
+
+        // Guarda primero en el teléfono y después intenta enviar. Dice si quedó guardada en el teléfono y si el
+        // servidor la confirmó a tiempo.
+        const registrarVisita = async (visita, timeoutMs) => {
+            const completa = { ...visita, id: visita.id || nuevaIdVisita(), vendedorId: String(visita.vendedorId) };
+            const guardadaEnTelefono = guardarColaVisitas(completa.vendedorId, [...leerColaVisitas(completa.vendedorId).filter(v => v.id !== completa.id), completa]);
+            const confirmado = await enviarVisita(completa, timeoutMs);
+            return { confirmado, guardadaEnTelefono };
+        };
+
+        const reintentarColaVisitas = (vendedorId) => {
+            leerColaVisitas(vendedorId).forEach(v => { enviarVisita(v, 0); });
+        };
+        // Reintenta las colas de TODOS los vendedores que dejaron visitas pendientes en este teléfono.
+        const reintentarTodasLasColasVisitas = () => {
+            vendedoresConColaVisitas().forEach(reintentarColaVisitas);
+        };
+
+        // Visita que deja un pedido enviado: mismo punto GPS, resultado "Vendió".
+        const visitaDePedido = ({ currentUser, client, pedidoId, ubicacion, precision, fecha }) => ({
+            vendedorId: String(currentUser.id),
+            vendedorNombre: currentUser.nombre || '',
+            clienteId: client.idCliente || 'S/N',
+            clienteNombre: client.cliente || '',
+            ciudad: client.ciudad || '',
+            clienteNuevo: false,
+            fecha,
+            dia: diaLocal(new Date(fecha)),
+            resultado: 'vendio',
+            nota: '',
+            ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, precision: Number.isFinite(precision) ? Math.round(precision) : null } : null,
+            origen: 'pedido',
+            pedidoId: pedidoId || null
+        });
+
+        const VisitasVendedorView = ({ currentUser, cartera, openModal }) => {
+            const vendedorId = String(currentUser.id);
+            const hoy = diaLocal();
+            const [busqueda, setBusqueda] = useState('');
+            const [nuevoAbierto, setNuevoAbierto] = useState(false);
+            const [nuevoNombre, setNuevoNombre] = useState('');
+            const [cliente, setCliente] = useState(null);
+            const [resultado, setResultado] = useState('');
+            const [nota, setNota] = useState('');
+            const [guardando, setGuardando] = useState(false);
+            const [estadoGuardado, setEstadoGuardado] = useState('');
+            const [visitasServidor, setVisitasServidor] = useState([]);
+            const [leyendo, setLeyendo] = useState(true);
+            const [errorLectura, setErrorLectura] = useState(false);
+            const [cola, setCola] = useState(() => leerColaVisitas(vendedorId));
+
+            // Solo las visitas de HOY de este vendedor (no toda la colección).
+            useEffect(() => {
+                setLeyendo(true);
+                setErrorLectura(false);
+                const q = query(collection(db, getCollectionPath('visitas')), where('vendedorId', '==', vendedorId), where('dia', '==', hoy));
+                const unsub = onSnapshot(q,
+                    snap => { setVisitasServidor(snap.docs.map(d => limpiarVisitaLeida({ ...d.data(), id: d.id }))); setLeyendo(false); setErrorLectura(false); },
+                    err => { console.warn('No se pudieron leer las visitas de hoy', err); setLeyendo(false); setErrorLectura(true); });
+                return () => unsub();
+            }, [vendedorId, hoy]);
+
+            useEffect(() => {
+                const alCambiar = () => setCola(leerColaVisitas(vendedorId));
+                window.addEventListener(EVENTO_COLA_VISITAS, alCambiar);
+                window.addEventListener('storage', alCambiar);
+                return () => { window.removeEventListener(EVENTO_COLA_VISITAS, alCambiar); window.removeEventListener('storage', alCambiar); };
+            }, [vendedorId]);
+
+            const visitasHoy = useMemo(() => {
+                const porId = new Map();
+                visitasServidor.forEach(v => porId.set(v.id, { ...v, pendiente: false }));
+                cola.filter(v => v.dia === hoy).forEach(v => porId.set(v.id, { ...v, pendiente: true }));
+                return Array.from(porId.values()).sort((a, b) => safeGetTime(b.fecha) - safeGetTime(a.fecha));
+            }, [visitasServidor, cola, hoy]);
+            const pendientesOtrosDias = cola.filter(v => v.dia !== hoy).length;
+
+            // Mismo criterio de identificación de cliente en las visitas y en la lista (clientes sin código incluidos).
+            const visitadosHoy = useMemo(() => new Set(visitasHoy.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId))), [visitasHoy]);
+
+            const miCartera = useMemo(() => (
+                (currentUser.rol === 'admin' || currentUser.rol === 'gerente') ? (cartera || []) : filtrarCarteraPorVendedor(cartera, currentUser.id)
+            ), [cartera, currentUser]);
+            const LIMITE_LISTA = 60;
+            const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, busqueda)), [miCartera, busqueda]);
+
+            const elegir = (c) => { setCliente(c); setResultado(''); setNota(''); setEstadoGuardado(''); };
+            const cancelar = () => { setCliente(null); setResultado(''); setNota(''); setEstadoGuardado(''); };
+            const cancelarNuevo = () => { setNuevoAbierto(false); setNuevoNombre(''); };
+            const nombreNuevo = nuevoNombre.trim().replace(/\s+/g, ' ');
+            const claveNueva = claveClienteVisita('', nombreNuevo, vendedorId);
+            const nombreNuevoValido = nombreNuevo.length >= 3 && claveNueva !== '';
+            // Si el nombre ya está en su cartera (sin importar tildes ni mayúsculas) se usa ese cliente; si no, es un
+            // cliente nuevo.
+            const usarClienteNuevo = () => {
+                if (!nombreNuevoValido) return;
+                const enCartera = miCartera.find(c => textoParaClave(c.cliente) === textoParaClave(nombreNuevo));
+                elegir(enCartera || { idCliente: claveNueva, cliente: nombreNuevo, ciudad: '', nuevo: true });
+                cancelarNuevo();
+            };
+
+            const marcar = async () => {
+                if (!cliente || !resultado || guardando) return;
+                setGuardando(true);
+                setEstadoGuardado('Obteniendo ubicación GPS...');
+                let ubicacion;
+                try {
+                    ubicacion = await obtenerUbicacionVisitaConReintento(15000, () => setEstadoGuardado('Buscando señal GPS... un momento'));
+                } catch (err) {
+                    console.warn('Sin ubicación para la visita', err);
+                    const codigo = err && err.code;
+                    openModal('alert', null, 'Sin ubicación', codigo === 1
+                        ? 'No se pudo usar la ubicación. Verifica que la ubicación del teléfono esté activada y que el navegador tenga permiso (ícono del candado junto a la dirección), y vuelve a intentar.'
+                        : codigo === 2
+                            ? 'El teléfono no pudo determinar dónde estás. Verifica que la ubicación esté activa, sal a un lugar abierto y vuelve a intentar.'
+                            : codigo === 3
+                                ? 'La ubicación tardó demasiado. Verifica que el GPS esté activo y que tengas buena señal, y vuelve a intentar.'
+                                : 'Este teléfono o navegador no permite usar la ubicación, así que no se puede marcar la visita.', true);
+                    setGuardando(false);
+                    setEstadoGuardado('');
+                    return;
+                }
+                setEstadoGuardado('Guardando visita...');
+                const ahora = new Date();
+                const { confirmado, guardadaEnTelefono } = await registrarVisita({
+                    vendedorId,
+                    vendedorNombre: currentUser.nombre || '',
+                    clienteId: cliente.idCliente || 'S/N',
+                    clienteNombre: cliente.cliente || '',
+                    ciudad: cliente.ciudad || '',
+                    clienteNuevo: !!cliente.nuevo,
+                    fecha: ahora.toISOString(),
+                    dia: diaLocal(ahora),
+                    resultado,
+                    nota: nota.trim(),
+                    ubicacion,
+                    origen: 'manual',
+                    pedidoId: null
+                });
+                setGuardando(false);
+                setEstadoGuardado('');
+                setCliente(null);
+                setResultado('');
+                setNota('');
+                setBusqueda('');
+                if (confirmado) {
+                    openModal('alert', null, 'Éxito', 'Listo: la visita quedó registrada.', true);
+                } else if (guardadaEnTelefono) {
+                    openModal('alert', null, 'Visita guardada, enviando…', 'La visita quedó guardada en este teléfono, pero por la señal todavía no llega. No la vuelvas a marcar: se envía sola cuando vuelva la señal. Mientras tanto la verás como "Pendiente de enviar".', true);
+                } else {
+                    openModal('alert', null, 'Visita sin copia en el teléfono', 'Se está enviando, pero no se pudo guardar en este teléfono (el almacenamiento está lleno o bloqueado) y todavía no hay confirmación por la señal. No cierres la app: espera a verla en "Mis visitas de hoy". Si no aparece, márcala de nuevo.', true);
+                }
+            };
+
+            const precisionTexto = (u) => (u && Number.isFinite(u.precision)) ? `± ${u.precision} m` : '';
+
+            return (
+                <div className="space-y-6 animate-fadeIn p-4 md:p-8">
+                    {!cliente ? (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            <div className="bg-gradient-to-r from-blue-900 to-blue-800 text-white p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div>
+                                    <h3 className="font-black text-xl flex items-center gap-3"><MapPin size={24} className="text-orange-400" /> Marcar visita</h3>
+                                    <p className="text-sm text-blue-200 mt-1 font-medium">Busca el cliente que estás visitando. La ubicación se toma solo al marcar.</p>
+                                </div>
+                                <div className="relative w-full md:w-auto">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input type="text" placeholder="Buscar por nombre o código..." value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                                        className="w-full md:w-64 pl-10 pr-4 py-2.5 bg-white/10 border border-white/20 focus:bg-white focus:text-slate-800 text-white placeholder-white/60 rounded-xl outline-none transition-all font-medium" />
+                                </div>
+                            </div>
+                            <div className="p-4 md:p-6 bg-slate-50">
+                                {!nuevoAbierto ? (
+                                    <button onClick={() => setNuevoAbierto(true)} className="w-full mb-4 py-3 border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 font-bold rounded-xl transition-colors flex justify-center items-center gap-2">
+                                        <PlusCircle size={18} /> Cliente nuevo (no está en mi cartera)
+                                    </button>
+                                ) : (
+                                    <div className="mb-4 bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3">
+                                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Nombre del cliente nuevo</p>
+                                        <input type="text" value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} maxLength={80} placeholder="Ej.: Bodega La Esquina"
+                                            className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-blue-500 transition-colors font-medium" />
+                                        {nombreNuevo.length >= 3 && claveNueva === '' && (
+                                            <p className="text-xs font-bold text-red-600">Escribe un nombre con letras o números.</p>
+                                        )}
+                                        <div className="flex gap-2">
+                                            <button onClick={cancelarNuevo} className="flex-1 py-2.5 border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-600">Cancelar</button>
+                                            <button onClick={usarClienteNuevo} disabled={!nombreNuevoValido} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-xl text-sm font-bold">Continuar</button>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {clientesFiltrados.slice(0, LIMITE_LISTA).map((c, idx) => {
+                                        const yaVisitado = visitadosHoy.has(claveClienteVisita(c.idCliente, c.cliente, vendedorId));
+                                        return (
+                                            <button key={`${c.idCliente || 'sn'}-${idx}`} onClick={() => elegir(c)}
+                                                className="text-left bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-blue-300 transition-all flex items-center gap-3">
+                                                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0"><Users size={18} /></div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="font-black text-slate-800 text-sm leading-tight"><span className="text-blue-600">[{c.idCliente || 'S/N'}]</span> {c.cliente}</p>
+                                                    {c.ciudad && <p className="text-[11px] text-slate-500 font-bold uppercase mt-0.5">{c.ciudad}</p>}
+                                                </div>
+                                                {yaVisitado && <span className="text-[10px] font-black uppercase bg-green-100 text-green-700 px-2 py-1 rounded-full shrink-0">Visitado hoy</span>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {clientesFiltrados.length > LIMITE_LISTA && (
+                                    <p className="text-xs text-slate-500 font-medium text-center mt-4">Se muestran {LIMITE_LISTA} de {clientesFiltrados.length}. Escribe en el buscador para encontrar al cliente.</p>
+                                )}
+                                {clientesFiltrados.length === 0 && (
+                                    <div className="flex flex-col items-center justify-center py-14 text-slate-400">
+                                        <MapPin size={40} className="mb-3 opacity-30" />
+                                        <p className="font-medium">{miCartera.length === 0 ? 'Todavía no hay clientes cargados en tu ruta.' : 'No se encontraron clientes con esa búsqueda.'}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            <div className="bg-gradient-to-r from-blue-900 to-blue-800 text-white p-6">
+                                <button onClick={cancelar} disabled={guardando} className="text-xs font-bold text-blue-200 hover:text-white mb-3 disabled:opacity-50">← Cambiar cliente</button>
+                                <h3 className="font-black text-xl leading-tight"><span className="text-orange-300">[{cliente.nuevo ? 'Nuevo' : (cliente.idCliente || 'S/N')}]</span> {cliente.cliente}</h3>
+                                {cliente.ciudad && <p className="text-xs text-blue-200 font-bold uppercase mt-1">{cliente.ciudad}</p>}
+                            </div>
+                            <div className="p-6 space-y-5">
+                                <div>
+                                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">¿Cómo te fue?</p>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                        {RESULTADOS_VISITA.map(r => (
+                                            <button key={r.id} onClick={() => setResultado(r.id)} disabled={guardando}
+                                                className={`py-3 px-2 rounded-xl text-sm font-bold border-2 transition-colors ${resultado === r.id ? 'border-blue-900 bg-blue-900 text-white' : 'border-slate-200 text-slate-700 hover:border-blue-300'}`}>
+                                                {r.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">Nota (opcional)</p>
+                                    <textarea value={nota} onChange={e => setNota(e.target.value)} disabled={guardando} rows={2} maxLength={300}
+                                        placeholder="Ej.: volver el jueves, habló con el encargado..."
+                                        className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-blue-500 transition-colors font-medium" />
+                                </div>
+                                <button onClick={marcar} disabled={!resultado || guardando}
+                                    className="w-full py-4 bg-orange-500 hover:bg-orange-600 disabled:bg-slate-300 text-white font-black rounded-xl transition-colors shadow-sm flex justify-center items-center gap-2">
+                                    <Crosshair size={20} /> {guardando ? estadoGuardado : (resultado ? 'Marcar visita aquí' : 'Elige cómo te fue')}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                        <div className="bg-slate-50 p-5 border-b border-slate-100 flex justify-between items-center gap-3">
+                            <h3 className="font-black text-lg text-blue-900 flex items-center gap-2"><Clock className="text-orange-500" size={20} /> Mis visitas de hoy</h3>
+                            <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{visitasHoy.length}</span>
+                        </div>
+                        {pendientesOtrosDias > 0 && (
+                            <p className="px-5 pt-4 text-xs font-bold text-orange-600">Hay {pendientesOtrosDias} visita(s) de días anteriores esperando señal para enviarse.</p>
+                        )}
+                        {errorLectura && (
+                            <p className="px-5 pt-4 text-xs font-bold text-red-600">No se pudieron leer tus visitas de hoy (revisa la señal). Lo que ves puede estar incompleto.</p>
+                        )}
+                        {visitasHoy.length === 0 ? (
+                            <p className="p-6 text-sm text-slate-400 font-medium text-center">{leyendo ? 'Cargando…' : (errorLectura ? 'No se pudieron leer las visitas.' : 'Todavía no has marcado visitas hoy.')}</p>
+                        ) : (
+                            <ul className="divide-y divide-slate-100">
+                                {visitasHoy.map(v => {
+                                    const r = resultadoVisita(v.resultado);
+                                    return (
+                                        <li key={v.id} className="p-4 flex items-start gap-3">
+                                            <span className="text-sm font-black text-slate-500 w-12 shrink-0 pt-0.5">{horaCorta(v.fecha)}</span>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-bold text-slate-800 text-sm leading-tight"><span className="text-blue-600">[{etiquetaClienteVisita(v)}]</span> {v.clienteNombre}</p>
+                                                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${r.clase}`}>{r.label}</span>
+                                                    {v.origen === 'pedido' && <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Con pedido</span>}
+                                                    {v.pendiente && <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800">Pendiente de enviar</span>}
+                                                    {precisionTexto(v.ubicacion) && <span className="text-[10px] font-bold text-slate-400">{precisionTexto(v.ubicacion)}</span>}
+                                                </div>
+                                                {v.nota && <p className="text-xs text-slate-500 mt-1.5">{v.nota}</p>}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // Mapa y resumen de las visitas de UN día. Las ALERTAS por validar se calculan con los últimos 7 días,
+        // para que una alerta de ayer (o de una visita enviada tarde por falta de señal) no pase desapercibida.
+        const VisitasMapaPanel = ({ users, currentUser, dia, setDia, vendedorSel, setVendedorSel }) => {
+            const mapRef = useRef(null);
+            const mapContainerRef = useRef(null);
+            const capaRef = useRef(null);
+            const encuadreRef = useRef('');
+            const buscadasRef = useRef(new Map());
+            const hoy = diaLocal();
+            const desdeSemana = restarDiasVisita(hoy, 6);
+
+            // Últimos 7 días (hoy incluido): sirve para las alertas y, si el día elegido cae ahí, para el mapa y la tabla.
+            const [semana, setSemana] = useState({ visitas: [], cargando: true, error: false });
+            useEffect(() => {
+                setSemana(prev => ({ ...prev, cargando: true, error: false }));
+                const q = query(collection(db, getCollectionPath('visitas')), where('dia', '>=', desdeSemana));
+                const unsub = onSnapshot(q,
+                    snap => setSemana({ visitas: snap.docs.map(d => limpiarVisitaLeida({ ...d.data(), id: d.id })), cargando: false, error: false }),
+                    err => { console.warn('No se pudieron leer las visitas de la semana', err); setSemana(prev => ({ ...prev, cargando: false, error: true })); });
+                return () => unsub();
+            }, [desdeSemana]);
+
+            // Un día más viejo que la semana (o futuro) se lee aparte.
+            const diaEnSemana = !!dia && dia >= desdeSemana && dia <= hoy;
+            const [aparte, setAparte] = useState({ visitas: [], cargando: false, error: false });
+            useEffect(() => {
+                if (!dia || diaEnSemana) { setAparte({ visitas: [], cargando: false, error: false }); return; }
+                setAparte({ visitas: [], cargando: true, error: false });
+                const q = query(collection(db, getCollectionPath('visitas')), where('dia', '==', dia));
+                const unsub = onSnapshot(q,
+                    snap => setAparte({ visitas: snap.docs.map(d => limpiarVisitaLeida({ ...d.data(), id: d.id })), cargando: false, error: false }),
+                    err => { console.warn('No se pudieron leer las visitas', err); setAparte({ visitas: [], cargando: false, error: true }); });
+                return () => unsub();
+            }, [dia, diaEnSemana]);
+
+            const cargando = diaEnSemana ? semana.cargando : aparte.cargando;
+            const errorLectura = diaEnSemana ? semana.error : aparte.error;
+            const visitasDia = useMemo(() => (diaEnSemana ? semana.visitas.filter(v => v.dia === dia) : aparte.visitas), [diaEnSemana, semana.visitas, aparte.visitas, dia]);
+
+            const esDeMiEquipo = React.useCallback((vendedorId) => visitaEsDeMiEquipo(vendedorId, users, currentUser), [users, currentUser]);
+            const visitasEquipo = useMemo(() => visitasDia.filter(v => esDeMiEquipo(v.vendedorId)), [visitasDia, esDeMiEquipo]);
+            const candidatasAlerta = useMemo(
+                () => semana.visitas.concat(diaEnSemana ? [] : aparte.visitas).filter(v => esDeMiEquipo(v.vendedorId)),
+                [semana.visitas, aparte.visitas, diaEnSemana, esDeMiEquipo]);
+            const vendedores = useMemo(() => {
+                const m = new Map();
+                visitasEquipo.forEach(v => { if (!m.has(v.vendedorId)) m.set(v.vendedorId, v.vendedorNombre || v.vendedorId); });
+                return Array.from(m.entries()).map(([id, nombre]) => ({ id, nombre })).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+            }, [visitasEquipo]);
+            // Si el vendedor elegido no tiene visitas ese día, se muestra "Todos" (y se filtra como "Todos").
+            const vendedorEfectivo = vendedores.some(v => v.id === vendedorSel) ? vendedorSel : 'ALL';
+            const visibles = useMemo(() => visitasEquipo
+                .filter(v => vendedorEfectivo === 'ALL' || v.vendedorId === vendedorEfectivo)
+                .sort((a, b) => safeGetTime(a.fecha) - safeGetTime(b.fecha)), [visitasEquipo, vendedorEfectivo]);
+
+            // Ubicación registrada de cada cliente (un getDoc por cliente que falte). Solo se recuerdan las
+            // encontradas; las que no existen se vuelven a buscar como mucho cada 2 minutos.
+            const [referencias, setReferencias] = useState({});
+            useEffect(() => {
+                const ahora = Date.now();
+                const faltan = Array.from(new Set(candidatasAlerta.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)).filter(Boolean)))
+                    .filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
+                if (faltan.length === 0) return;
+                faltan.forEach(c => buscadasRef.current.set(c, ahora));
+                Promise.all(faltan.map(c => {
+                    try {
+                        return getDoc(doc(db, getCollectionPath('clientesUbicacion'), c))
+                            .then(s => (s.exists() ? [c, s.data()] : null))
+                            .catch(() => { buscadasRef.current.delete(c); return null; });
+                    } catch (e) { return Promise.resolve(null); }
+                })).then(pares => {
+                    const nuevas = {};
+                    pares.forEach(p => { if (p) nuevas[p[0]] = p[1]; });
+                    if (Object.keys(nuevas).length > 0) setReferencias(prev => ({ ...prev, ...nuevas }));
+                });
+            }, [candidatasAlerta]);
+
+            const evaluar = (v) => evaluarDistanciaVisita(v, referencias[claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)]);
+            const evaluadas = useMemo(() => visibles.map(v => ({ v, ev: evaluar(v) })), [visibles, referencias]);
+            const verificacion = useMemo(() => resumenVerificacion(evaluadas), [evaluadas]);
+            const alertas = useMemo(() => candidatasAlerta
+                .map(v => ({ v, ev: evaluar(v) }))
+                .filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v))
+                .sort((a, b) => safeGetTime(b.v.fecha) - safeGetTime(a.v.fecha)), [candidatasAlerta, referencias]);
+            const alertasDelDiaPorVendedor = useMemo(() => {
+                const m = {};
+                evaluadas.filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v)).forEach(a => { m[a.v.vendedorId] = (m[a.v.vendedorId] || 0) + 1; });
+                return m;
+            }, [evaluadas]);
+
+            // Solo el administrador valida alertas o corrige la ubicación de un cliente.
+            const esAdmin = currentUser.rol === 'admin';
+            const validar = async (v) => {
+                try {
+                    await updateDoc(doc(db, getCollectionPath('visitas'), v.id), datosRevisionVisita(currentUser));
+                } catch (err) { console.warn('No se pudo validar la visita', err); }
+            };
+            const ubicarClienteAqui = async (v) => {
+                const clave = claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId);
+                if (!clave || !puntoValido(v.ubicacion)) return;
+                const datos = datosUbicacionAdministrador(v, currentUser);
+                try {
+                    await setDoc(doc(db, getCollectionPath('clientesUbicacion'), clave), datos);
+                    setReferencias(prev => ({ ...prev, [clave]: datos }));
+                } catch (err) { console.warn('No se pudo fijar la ubicación del cliente', err); }
+            };
+
+            const resumen = useMemo(() => {
+                const m = new Map();
+                visibles.forEach(v => {
+                    if (!m.has(v.vendedorId)) m.set(v.vendedorId, { id: v.vendedorId, nombre: v.vendedorNombre || v.vendedorId, total: 0, conPedido: 0, porResultado: {}, primera: null, ultima: null });
+                    const r = m.get(v.vendedorId);
+                    r.total += 1;
+                    if (v.origen === 'pedido') r.conPedido += 1;
+                    r.porResultado[v.resultado] = (r.porResultado[v.resultado] || 0) + 1;
+                    if (!r.primera || safeGetTime(v.fecha) < safeGetTime(r.primera)) r.primera = v.fecha;
+                    if (!r.ultima || safeGetTime(v.fecha) > safeGetTime(r.ultima)) r.ultima = v.fecha;
+                });
+                return Array.from(m.values()).sort((a, b) => b.total - a.total);
+            }, [visibles]);
+
+            useEffect(() => {
+                if (!window.L || mapRef.current || !mapContainerRef.current) return;
+                mapRef.current = window.L.map(mapContainerRef.current).setView([10.4806, -66.9036], 6);
+                agregarFondoMapa(mapRef.current);
+                capaRef.current = window.L.layerGroup().addTo(mapRef.current);
+                return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+            }, []);
+
+            useEffect(() => {
+                if (!mapRef.current || !capaRef.current) return;
+                capaRef.current.clearLayers();
+                const puntos = [];
+                evaluadas.forEach(({ v, ev }) => {
+                    const u = v.ubicacion;
+                    if (!puntoValido(u)) return;
+                    const r = resultadoVisita(v.resultado);
+                    const enAlerta = ev.estado === 'lejos' && !visitaValidada(v);
+                    const marca = window.L.circleMarker([u.lat, u.lng], { radius: enAlerta ? 11 : 9, color: enAlerta ? '#dc2626' : '#ffffff', weight: enAlerta ? 4 : 2, fillColor: r.color, fillOpacity: 0.9 });
+                    marca.bindPopup(`
+                        <div class="p-1">
+                            <strong class="text-blue-900 block mb-1 text-sm">[${escaparHtml(etiquetaClienteVisita(v))}] ${escaparHtml(v.clienteNombre)}</strong>
+                            <span class="text-xs text-slate-500 block">Vendedor: ${escaparHtml(v.vendedorNombre)}</span>
+                            <span class="text-xs text-slate-500 block">Hora: ${escaparHtml(horaCorta(v.fecha))}${Number.isFinite(u.precision) ? ` · GPS ± ${escaparHtml(u.precision)} m` : ''}</span>
+                            <span class="text-xs font-bold block mt-1" style="color:${r.color}">${escaparHtml(r.label)}${v.origen === 'pedido' ? ' (con pedido)' : ''}</span>
+                            ${v.nota ? `<span class="text-xs text-slate-600 block mt-1">${escaparHtml(v.nota)}</span>` : ''}
+                            ${ev.estado === 'lejos' ? `<span class="text-xs font-bold block mt-1" style="color:${visitaValidada(v) ? '#16a34a' : '#dc2626'}">${visitaValidada(v) ? 'Alerta validada' : 'Alerta'}: a ${escaparHtml(ev.metros)} m del cliente</span>` : ''}
+                            ${v.clienteNuevo ? `<span class="text-[10px] font-bold block mt-1 text-blue-700">Cliente nuevo</span>` : ''}
+                        </div>`);
+                    marca.addTo(capaRef.current);
+                    puntos.push([u.lat, u.lng]);
+                });
+                // Solo se reencuadra al cambiar el día o el vendedor (no en cada actualización en vivo).
+                const clave = dia + '|' + vendedorEfectivo;
+                if (puntos.length > 0 && encuadreRef.current !== clave) {
+                    mapRef.current.fitBounds(puntos, { padding: [50, 50], maxZoom: 16 });
+                    encuadreRef.current = clave;
+                }
+            }, [evaluadas]);
+
+            const etiquetaDia = (d) => (d === hoy ? 'hoy' : (String(d || '').split('-').reverse().slice(0, 2).join('/')));
+
+            return (
+                <div className="space-y-4">
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Día:</span>
+                                <input type="date" value={dia} onChange={e => setDia(e.target.value)} className="text-sm font-bold text-blue-900 bg-transparent outline-none cursor-pointer pr-2" />
+                            </div>
+                            <div className="flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase ml-2">Vendedor:</span>
+                                <select value={vendedorEfectivo} onChange={e => setVendedorSel(e.target.value)} className="text-sm font-bold text-blue-900 bg-transparent outline-none cursor-pointer pr-2">
+                                    <option value="ALL">Todos</option>
+                                    {vendedores.map(v => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                                </select>
+                            </div>
+                            <span className="text-sm font-bold text-slate-500">{cargando ? 'Cargando…' : `${visibles.length} visita(s)`}</span>
+                            <div className="flex flex-wrap gap-3 ml-auto">
+                                {RESULTADOS_VISITA.map(r => (
+                                    <span key={r.id} className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                                        <span className="w-3 h-3 rounded-full inline-block" style={{ background: r.color }}></span>{r.label}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                        {errorLectura && (
+                            <p className="text-xs font-bold text-red-600">No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto.</p>
+                        )}
+                        {visibles.length > 0 && (
+                            <p className="text-xs text-slate-500 font-medium">
+                                Verificación de las {visibles.length} visita(s) con la ubicación del cliente: {verificacion.cerca} cerca · {verificacion.lejos} lejos · {verificacion.referencia} primera visita (fija la ubicación del cliente) · {verificacion.sinReferencia} sin ubicación del cliente para comparar · {verificacion.sinGps} sin GPS
+                            </p>
+                        )}
+                    </div>
+
+                    {alertas.length > 0 && (
+                        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 space-y-3">
+                            <h3 className="font-black text-red-800 flex items-center gap-2"><AlertCircle size={18} /> Alertas por validar: visitas marcadas lejos del cliente ({alertas.length})</h3>
+                            <p className="text-xs text-red-700 font-medium">Se marcaron a más de {UMBRAL_LEJOS_METROS} m de donde está registrado el cliente (ya descontado el margen de error del GPS). Se muestran las de los últimos 7 días. La visita sí quedó guardada.</p>
+                            <ul className="divide-y divide-red-100">
+                                {alertas.map(({ v, ev }) => (
+                                    <li key={v.id} className="py-2 flex flex-col md:flex-row md:items-center gap-2">
+                                        <div className="flex-1 min-w-0 text-sm">
+                                            <p className="font-bold text-slate-800 leading-tight"><span className="text-blue-600">[{etiquetaClienteVisita(v)}]</span> {v.clienteNombre}</p>
+                                            <p className="text-xs text-slate-600">{v.vendedorNombre} · {etiquetaDia(v.dia)} {horaCorta(v.fecha)} · a <b>{ev.metros} m</b> del cliente{Number.isFinite(v.ubicacion.precision) ? ` · GPS ± ${v.ubicacion.precision} m` : ''}</p>
+                                        </div>
+                                        {esAdmin && (
+                                            <div className="flex gap-2 shrink-0">
+                                                <button onClick={() => validar(v)} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg">Validar</button>
+                                                <button onClick={() => ubicarClienteAqui(v)} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg">Ubicar cliente aquí</button>
+                                            </div>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden relative z-0">
+                        <div ref={mapContainerRef} className="w-full h-[420px] md:h-[520px] z-0"></div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
+                                <tr>
+                                    <th className="text-left p-3 font-black">Vendedor</th>
+                                    <th className="text-right p-3 font-black">Visitas</th>
+                                    {RESULTADOS_VISITA.map(r => <th key={r.id} className="text-right p-3 font-black whitespace-nowrap">{r.label}</th>)}
+                                    <th className="text-right p-3 font-black whitespace-nowrap">Con pedido</th>
+                                    <th className="text-right p-3 font-black whitespace-nowrap">Alertas</th>
+                                    <th className="text-right p-3 font-black whitespace-nowrap">Primera</th>
+                                    <th className="text-right p-3 font-black whitespace-nowrap">Última</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {resumen.length === 0 ? (
+                                    <tr><td colSpan={RESULTADOS_VISITA.length + 6} className="p-6 text-center text-slate-400 font-medium">{cargando ? 'Cargando…' : (errorLectura ? 'No se pudieron leer las visitas.' : 'No hay visitas registradas ese día.')}</td></tr>
+                                ) : resumen.map(r => (
+                                    <tr key={r.id}>
+                                        <td className="p-3 font-bold text-slate-800">{r.nombre}</td>
+                                        <td className="p-3 text-right font-black text-blue-900">{r.total}</td>
+                                        {RESULTADOS_VISITA.map(x => <td key={x.id} className="p-3 text-right text-slate-600">{r.porResultado[x.id] || 0}</td>)}
+                                        <td className="p-3 text-right text-slate-600">{r.conPedido}</td>
+                                        <td className="p-3 text-right">{alertasDelDiaPorVendedor[r.id] ? <span className="font-black text-red-600">{alertasDelDiaPorVendedor[r.id]}</span> : <span className="text-slate-600">0</span>}</td>
+                                        <td className="p-3 text-right text-slate-600">{horaCorta(r.primera)}</td>
+                                        <td className="p-3 text-right text-slate-600">{horaCorta(r.ultima)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        // Pantalla "Mapa de visitas": visitas del día (nuevo) y el mapa de pedidos de siempre. El día y el
+        // vendedor elegidos viven aquí para que no se pierdan al pasar de una pestaña a otra.
+        const MapaVisitasPantalla = ({ pedidos, users, currentUser }) => {
+            const [vista, setVista] = useState('visitas');
+            const [dia, setDia] = useState(() => diaLocal());
+            const [vendedorSel, setVendedorSel] = useState('ALL');
+            const cambiarDia = (d) => { setDia(d); setVendedorSel('ALL'); };
+            return (
+                <div className="space-y-4 p-4 md:p-8">
+                    <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex gap-2 overflow-x-auto">
+                        <button onClick={() => setVista('visitas')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${vista === 'visitas' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                            <MapPin size={18} /> Visitas del día
+                        </button>
+                        <button onClick={() => setVista('pedidos')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${vista === 'pedidos' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                            <Receipt size={18} /> Pedidos (GPS)
+                        </button>
+                    </div>
+                    {vista === 'visitas'
+                        ? <VisitasMapaPanel users={users} currentUser={currentUser} dia={dia} setDia={cambiarDia} vendedorSel={vendedorSel} setVendedorSel={setVendedorSel} />
+                        : <AdminZonasMap pedidos={pedidos} users={users} currentUser={currentUser} />}
+                </div>
+            );
+        };
+
         const AdminZonasMap = ({ pedidos, users, currentUser }) => {
             const mapRef = useRef(null);
             const mapContainerRef = useRef(null);
@@ -1429,9 +2297,7 @@
                 if (!window.L || mapRef.current || !mapContainerRef.current) return;
 
                 mapRef.current = window.L.map(mapContainerRef.current).setView([10.4806, -66.9036], 6);
-                window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                }).addTo(mapRef.current);
+                agregarFondoMapa(mapRef.current);
 
                 markersLayerRef.current = window.L.layerGroup().addTo(mapRef.current);
 
@@ -1453,11 +2319,11 @@
                     const marker = window.L.marker([p.ubicacion.lat, p.ubicacion.lng]);
                     const popupContent = `
                         <div class="p-1">
-                            <strong class="text-blue-900 block mb-1 text-sm">[${p.clienteId || 'S/N'}] ${p.clienteNombre}</strong>
-                            <span class="text-xs text-slate-500 block">Vendedor: ${p.vendedorNombre}</span>
+                            <strong class="text-blue-900 block mb-1 text-sm">[${escaparHtml(p.clienteId || 'S/N')}] ${escaparHtml(p.clienteNombre)}</strong>
+                            <span class="text-xs text-slate-500 block">Vendedor: ${escaparHtml(p.vendedorNombre)}</span>
                             <span class="text-xs text-slate-500 block">Fecha: ${safeFormatDate(p.fecha)}</span>
                             <span class="text-xs text-slate-500 block">Total: $${p.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                            <span class="text-[10px] font-bold px-2 py-0.5 rounded uppercase mt-2 inline-block ${p.estado === 'Aprobado' ? 'bg-green-100 text-green-700' : p.estado === 'Rechazado' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">${p.estado || 'Pendiente'}</span>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded uppercase mt-2 inline-block ${p.estado === 'Aprobado' ? 'bg-green-100 text-green-700' : p.estado === 'Rechazado' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">${escaparHtml(p.estado || 'Pendiente')}</span>
                         </div>
                     `;
                     marker.bindPopup(popupContent);
@@ -2134,13 +3000,17 @@
                 setSubmitStatus('Obteniendo Ubicación GPS...');
 
                 let ubicacion = null;
+                let precisionGps = null;
                 try {
                     if (!('geolocation' in navigator)) {
                         throw new Error('Geolocalización no soportada.');
                     }
                     ubicacion = await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(
-                            position => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+                            position => {
+                                precisionGps = position.coords.accuracy;
+                                resolve({ lat: position.coords.latitude, lng: position.coords.longitude });
+                            },
                             error => reject(error),
                             { timeout: 10000, enableHighAccuracy: true }
                         );
@@ -2172,7 +3042,13 @@
                         observacion: observacion
                     };
 
-                    await addDoc(collection(db, getCollectionPath('pedidos')), pedido);
+                    const pedidoRef = await addDoc(collection(db, getCollectionPath('pedidos')), pedido);
+                    // Cada pedido deja también su visita (BIT-011). Nunca frena ni rompe el pedido.
+                    if (currentUser.rol === 'vendedor') {
+                        try {
+                            registrarVisita(visitaDePedido({ currentUser, client, pedidoId: pedidoRef && pedidoRef.id, ubicacion, precision: precisionGps, fecha: pedido.fecha }), 0).catch(() => {});
+                        } catch (e) { console.warn('No se pudo registrar la visita del pedido', e); }
+                    }
                     try { localStorage.removeItem(draftKey); } catch (e) {}
                     openModal('alert', null, 'Éxito', 'El pedido ha sido registrado y enviado al administrador exitosamente.', true);
                     goBack();
@@ -11527,6 +12403,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                                 { id: 'ventas-cartera-activacion', label: 'Cartera / Activación' },
                                                 { id: 'incentivos-admin', label: 'Incentivos (Configuración)' },
                                                 { id: 'pedidos-vendedor', label: 'Toma de Pedidos' },
+                                                { id: 'visitas-vendedor', label: 'Visitas a Clientes (Vendedor)' },
                                                 { id: 'pedidos-admin', label: 'Admin Pedidos / Catálogo' },
                                                 { id: 'tab-pedidos', label: '↳ Pestaña: Pedidos Globales' },
                                                 { id: 'tab-zonas', label: '↳ Pestaña: Zonas (Mapa)' },
@@ -13380,6 +14257,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 case 'cxc': return mando ? { cartera: 'completo', cxc: 'completo' } : {};
                 case 'incentivos-admin': return { productos: 'completo' };
                 case 'ventas-global': return rol === 'admin' ? { cartera: 'completo', precios: 'completo' } : {};
+                case 'visitas-vendedor': return { cartera: propio };
                 case 'pedidos-vendedor': return { cartera: propio, productos: 'completo', precios: 'completo', pedidos: propio, cxc: 'completo' };
                 case 'pedidos-admin': return mando ? { cartera: 'completo', productos: 'completo', precios: 'completo', pedidos: 'completo', cxc: 'completo' } : {};
                 case 'pagos-reportar': return { cartera: propio, cxc: 'completo', pagos: propio, tasas: 'completo' };
@@ -13552,6 +14430,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 'ventas-global',
                 'ventas-mes',
                 'pedidos-vendedor',
+                'visitas-vendedor',
                 'pedidos-admin',
                 'ventas-historico',
                 'ventas-cartera-activacion',
@@ -13571,6 +14450,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (user.rol === 'admin' && (!user.permisos || !Array.isArray(user.permisos) || user.permisos.length === 0)) return true;
                 if (user.permisos && Array.isArray(user.permisos) && user.permisos.length > 0) {
                     if (id === 'pedidos-admin' && user.permisos.some(p => p.startsWith('tab-'))) return true;
+                    if (id === 'visitas-vendedor' && user.rol === 'vendedor' && user.permisos.includes('pedidos-vendedor')) return true;
                     return user.permisos.includes(id);
                 }
                 
@@ -13584,6 +14464,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (id === 'ventas-cartera-activacion') return true;
                 if (id === 'incentivos-admin') return rol === 'admin';
                 if (id === 'pedidos-vendedor') return true;
+                if (id === 'visitas-vendedor') return rol === 'vendedor';
                 if (id === 'pedidos-admin') return rol === 'admin' || rol === 'gerente';
                 if (id === 'gerente-mapa') return rol === 'admin' || rol === 'gerente';
                 if (id === 'guia') return true;
@@ -13696,6 +14577,15 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                 if (document.visibilityState === 'visible') armar();
                 return () => { clearTimeout(temporizador); document.removeEventListener('visibilitychange', alCambiarVisibilidad); };
             }, [idUsuarioActual, rolUsuarioActual]);
+
+            useEffect(() => {
+                if (!idUsuarioActual) return;
+                const reintentar = () => { if (navigator.onLine !== false) reintentarTodasLasColasVisitas(); };
+                reintentar();
+                window.addEventListener('online', reintentar);
+                const intervalo = setInterval(reintentar, 120000);
+                return () => { window.removeEventListener('online', reintentar); clearInterval(intervalo); };
+            }, [idUsuarioActual]);
 
             const marcarListo = (col, clave) => setListos(prev => prev[col] === clave ? prev : { ...prev, [col]: clave });
             const subirAlcance = (col) => setNecesidades(prev => prev[col] === 'completo' ? prev : { ...prev, [col]: 'completo' });
@@ -14185,6 +15075,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
 
                             <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1">Pedidos y Finanzas</p>
                             {hasPerm('pedidos-vendedor') && <NavBtn id="pedidos-vendedor" icon={ShoppingCart}>Tomar pedidos</NavBtn>}
+                            {hasPerm('visitas-vendedor') && <NavBtn id="visitas-vendedor" icon={MapPin}>Visitas</NavBtn>}
                             {hasPerm('pedidos-admin') && <NavBtn id="pedidos-admin" icon={Receipt}>Admin pedidos / catálogo</NavBtn>}
                             {hasPerm('cxc') && <NavBtn id="cxc" icon={Wallet}>Cobranzas (CxC)</NavBtn>}
                             {hasPerm('pagos-reportar') && <NavBtn id="pagos-reportar" icon={DollarSign}>Reportar pagos</NavBtn>}
@@ -14249,6 +15140,7 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                                 ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []),
                                 ...(hasPerm('incentivos-admin') ? [['incentivos-admin', 'Incent.']] : []),
                                 ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []),
+                                ...(hasPerm('visitas-vendedor') ? [['visitas-vendedor', 'Visitas']] : []),
                                 ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []),
                                 ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []),
                                 ...(hasPerm('pagos-reportar') ? [['pagos-reportar', 'Rep.Pagos']] : []),
@@ -14323,7 +15215,8 @@ ${JSON.stringify(dataPayload, null, 2)}`;
                             {globalActiveTab === 'pagos-reportar' && <PagosVendedorView currentUser={currentUser} cartera={carteraData} cxc={cxcData} pagos={pagosData} tasas={tasasData} openModal={openModal} db={db} getCollectionPath={getCollectionPath} />}
                             {globalActiveTab === 'pagos-admin' && <PagosAdminPanel currentUser={currentUser} users={users} cartera={carteraData} pagos={pagosData} openModal={openModal} db={db} getCollectionPath={getCollectionPath} />}
                             {globalActiveTab === 'tasas-admin' && <TasasAdminPanel currentUser={currentUser} tasas={tasasData} openModal={openModal} db={db} getCollectionPath={getCollectionPath} />}
-                            {globalActiveTab === 'gerente-mapa' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <AdminZonasMap pedidos={pedidosData} users={users} currentUser={currentUser} />}
+                            {globalActiveTab === 'visitas-vendedor' && hasPerm('visitas-vendedor') && <VisitasVendedorView currentUser={currentUser} cartera={carteraData} openModal={openModal} />}
+                            {globalActiveTab === 'gerente-mapa' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <MapaVisitasPantalla pedidos={pedidosData} users={users} currentUser={currentUser} />}
                             {globalActiveTab === 'cxc' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && <GerenteDashboard userId={currentUser.id} users={users} sales={deferredSalesData} cartera={carteraData} cxc={cxcData} initialTab="cxc" currentUser={currentUser} />}
                             </>)}
                         </div>
