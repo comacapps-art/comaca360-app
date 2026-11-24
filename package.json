@@ -13,6 +13,7 @@
     "medicion:activacion": "node herramientas/medicion_ventas/prueba_activacion.js",
     "medicion:cartera": "node herramientas/medicion_ventas/prueba_cartera.js",
     "medicion:ceder": "node herramientas/medicion_ventas/prueba_ceder.js",
+    "medicion:visitas": "node herramientas/medicion_ventas/prueba_visitas.js",
     "medicion:datos": "node herramientas/medicion_ventas/gen_csv_sintetico.js 150000 herramientas/medicion_ventas/ventas_sint.csv",
     "medicion:bench": "node --expose-gc herramientas/medicion_ventas/bench.js herramientas/medicion_ventas/ventas_sint.csv",
     "medicion:paridad": "node herramientas/medicion_ventas/paridad.js",
