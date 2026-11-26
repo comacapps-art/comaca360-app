@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Guía de visitas a clientes · COMACA 360</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>/* Carta vertical. Sistema visual de COMACA 360: azul 900/800/600 y naranja 500. */
+@page{size:8.5in 11in;margin:0}
+:root{--blue9:#1e3a8a;--blue8:#1e40af;--blue6:#2563eb;--or:#f97316;--or6:#ea580c;--paper:#f8fafc;--ink:#1e293b;--muted:#64748b;--line:#e2e8f0;--chip:#e8efff;--good:#16a34a;--bad:#dc2626;--violet:#9333ea}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html,body{margin:0;padding:0;background:#e2e8f0}
+body{font-family:'Plus Jakarta Sans','Segoe UI',Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.page{width:816px;height:1056px;position:relative;overflow:hidden;page-break-after:always;break-after:page;background:#fff;margin:0 auto}
+.page:last-child{page-break-after:auto;break-after:auto}
+svg.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.logo{font-weight:800;font-size:21px;letter-spacing:-.01em;color:var(--blue9)}
+.logo b{color:var(--or)}
+
+/* ---------- portada ---------- */
+.cover{background:linear-gradient(150deg,#1e3a8a 0%,#1e40af 52%,#c2410c 150%);color:#fff}
+.cv-top{position:absolute;left:56px;right:56px;top:46px;display:flex;justify-content:space-between;align-items:center}
+.cover .logo{color:#fff;font-size:28px}
+.cv-date{font-weight:600;font-size:14px;color:#c9d8ff;letter-spacing:.08em}
+.cv-main{position:absolute;left:56px;top:124px;width:680px}
+.eyebrow{margin:0;font-weight:700;font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#ffd2b0;display:flex;align-items:center;gap:12px}
+.eyebrow::before{content:"";width:34px;height:4px;border-radius:2px;background:var(--or)}
+.cover h1{margin:16px 0 0;font-size:58px;line-height:1.03;font-weight:800;letter-spacing:-.03em;text-wrap:balance}
+.cv-sub{margin:18px 0 0;font-size:17.5px;line-height:1.5;color:#dbe6ff;max-width:610px}
+.cv-cards{position:absolute;left:56px;right:56px;top:372px;display:flex;gap:18px;align-items:stretch}
+.pc{background:#fff;color:var(--ink);border-radius:22px;padding:22px 24px 20px;box-shadow:0 26px 50px -24px rgba(0,0,0,.55);position:relative;overflow:hidden;width:343px}
+.pc::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;background:var(--blue9)}
+.pc.main::before{background:var(--or)}
+.pc small{display:block;font-weight:800;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.pc h3{margin:6px 0 0;font-size:29px;line-height:1.06;font-weight:800;letter-spacing:-.02em;color:var(--blue9)}
+.pc p{margin:8px 0 0;font-size:13.5px;line-height:1.4;color:var(--muted);font-weight:600}
+.pc ul{list-style:none;margin:13px 0 0;padding:0;display:grid;gap:8px}
+.pc li{display:flex;gap:9px;align-items:flex-start;font-size:13px;line-height:1.36;font-weight:600}
+.pc li svg{width:17px;height:17px;color:var(--good);margin-top:1px;stroke-width:3}
+.cv-pay{position:absolute;left:56px;top:678px;display:flex;gap:10px;flex-wrap:wrap}
+.cv-pay span{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:999px;padding:7px 15px;font-size:12.5px;font-weight:600}
+.cv-pay svg{width:15px;height:15px}
+.cv-cap{position:absolute;left:56px;top:726px;margin:0;font-size:11.5px;color:#c9d8ff}
+.cv-phones{position:absolute;left:0;right:0;top:758px;height:298px;overflow:hidden}
+.cv-phones .pp{position:absolute}
+
+/* ---------- páginas interiores ---------- */
+.inner{background:#fff}
+.inner::before{content:"";position:absolute;right:-160px;top:-160px;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(37,99,235,.10),rgba(37,99,235,0) 70%)}
+.ph{position:absolute;left:56px;right:56px;top:32px;display:flex;justify-content:space-between;align-items:center}
+.ph .tag{font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pf{position:absolute;left:56px;right:56px;bottom:22px;display:flex;justify-content:space-between;font-size:10.5px;font-weight:600;color:var(--muted);border-top:1px solid var(--line);padding-top:9px}
+.body{position:absolute;left:56px;right:56px;top:74px;bottom:52px;overflow:hidden}
+.kicker{margin:0;font-weight:800;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--or6);display:flex;align-items:center;gap:10px}
+.kicker::before{content:"";width:26px;height:4px;border-radius:2px;background:var(--or)}
+.kicker.adm{color:var(--blue8)}
+.kicker.adm::before{background:var(--blue8)}
+h2{margin:6px 0 0;font-size:26px;line-height:1.12;font-weight:800;letter-spacing:-.02em;color:var(--blue9)}
+.lead{margin:6px 0 0;font-size:12.8px;line-height:1.48;color:var(--muted);max-width:700px}
+.lead b{color:var(--ink)}
+
+/* elementos comunes */
+.who{display:inline-block;font-weight:800;font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.who.adm{background:var(--chip);color:var(--blue9)}
+.who.ven{background:#ffedd5;color:var(--or6)}
+.n{flex:none;width:24px;height:24px;border-radius:50%;background:var(--blue9);color:#fff;font-weight:800;font-size:12px;display:grid;place-items:center}
+.bk{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--or);color:#fff;font-style:normal;font-weight:800;font-size:9px;margin:0 2px;vertical-align:1px;line-height:1}
+.pin{position:absolute;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;background:var(--or);color:#fff;font-weight:800;font-size:10.5px;line-height:16px;text-align:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(15,23,42,.38);z-index:5}
+.sh{margin:0 0 8px;font-size:13.5px;font-weight:800;color:var(--blue9)}
+.two{display:grid;grid-template-columns:var(--c1,246px) 1fr;gap:18px;align-items:start}
+.two2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.sidecol{min-width:0}
+.tip,.info{border-radius:14px;padding:9px 13px;font-size:11.5px;line-height:1.46;font-weight:500}
+.tip{background:#fff7ed;border:1px solid #fed7aa;border-left:6px solid var(--or);color:#7c2d12}
+.info{background:#f3f6ff;border:1px solid #dbe5ff;border-left:6px solid var(--blue6);color:#1e3a8a}
+.tip b,.info b{font-weight:800}
+.read{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.read li{border:1px solid var(--line);border-radius:12px;padding:7px 11px;font-size:11.4px;line-height:1.4;color:#475569;background:#fff;font-weight:500}
+.read li .t{display:block;color:var(--blue9);font-size:12px;font-weight:800;margin-bottom:1px}
+.read li b{color:var(--ink);font-weight:800}
+.feat{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.fcard{border:1px solid var(--line);border-radius:16px;padding:13px 15px;background:#fff;box-shadow:0 12px 24px -20px rgba(30,58,138,.6);position:relative;overflow:hidden}
+.fcard::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:var(--or)}
+.fcard.b::before{background:var(--blue9)}
+.fcard .fi{width:34px;height:34px;border-radius:10px;background:var(--chip);color:var(--blue9);display:grid;place-items:center;margin-bottom:7px}
+.fcard.a .fi{background:#ffedd5;color:var(--or6)}
+.fcard h4{margin:0;font-size:14.5px;font-weight:800;color:var(--blue9)}
+.fcard p{margin:4px 0 0;font-size:11.6px;line-height:1.45;color:#475569;font-weight:500}
+.tips3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.tips4{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}
+.tcard{border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:11px;line-height:1.42;color:#475569;background:#fff;font-weight:500}
+.tcard .t{display:block;color:var(--blue9);font-weight:800;font-size:11.8px;margin-bottom:2px}
+.tcard b{color:var(--ink);font-weight:800}
+.cases{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.case{position:relative;border:1px solid var(--line);border-radius:13px;padding:10px 11px 10px 42px;font-size:11px;line-height:1.42;color:#475569;background:#fff;font-weight:500}
+.case b{color:var(--blue9);font-size:11.6px}
+.cn{position:absolute;left:11px;top:11px;width:22px;height:22px;border-radius:50%;background:var(--or);color:#fff;font-weight:800;font-size:11.5px;display:grid;place-items:center}
+.strip{margin-top:12px;border:1px solid #dbe5ff;background:#f3f6ff;border-radius:14px;padding:10px 12px 12px}
+.strip .sh{margin-bottom:8px;font-size:12.8px}
+.steps4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.steps4>div{background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 8px 9px;font-size:10.8px;line-height:1.35;color:#475569;font-weight:500;text-align:center}
+.steps4 .n{margin:0 auto 5px}
+.steps4 b{color:var(--ink);font-weight:800}
+.faq{margin-top:11px;border:1px solid var(--line);border-radius:14px;padding:10px 14px 4px;background:#fff}
+.faq h4{margin:0 0 4px;font-size:12.8px;font-weight:800;color:var(--blue9);display:flex;align-items:center;gap:7px}
+.faq h4 svg{color:var(--or6);width:17px;height:17px}
+.qa{display:grid;grid-template-columns:215px 1fr;gap:12px;padding:6px 0;border-top:1px solid var(--line);font-size:11px;line-height:1.42}
+.qa:first-of-type{border-top:0}
+.qa b{color:var(--ink);font-weight:800}
+.qa span{color:#475569;font-weight:500}
+.phones{display:flex;gap:18px;justify-content:center;margin-top:12px;align-items:flex-start}
+.pcol{flex:none}
+.cap{margin-top:9px}
+.cap h4{margin:0;font-size:12.8px;line-height:1.25;font-weight:800;color:var(--blue9);display:flex;gap:7px;align-items:center}
+.cap p{margin:5px 0 0;font-size:11.2px;line-height:1.44;color:#475569;font-weight:500}
+.cap p b{color:var(--ink)}
+.ilust-lbl{margin:5px 0 0;font-size:9.8px;font-weight:700;color:var(--muted);text-align:center;letter-spacing:.02em}
+
+/* ---------- maquetas de teléfono y escritorio ---------- */
+.phone-frame{position:relative;border:4px solid #0f172a;border-radius:22px;background:#f1f5f9;box-shadow:0 14px 26px -14px rgba(15,23,42,.65);overflow:visible}
+.phone-screen{border-radius:17px;overflow:hidden;background:#f1f5f9;font-size:9.2px;line-height:1.32;color:var(--ink)}
+.app-bar{background:var(--blue9);color:#fff;padding:7px 9px 5px;display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:10px}
+.app-bar b{color:var(--or)}
+.app-tabs{background:#172554;display:flex;gap:3px;padding:4px 6px 0;overflow:hidden}
+.app-tab{padding:4px 7px;border-radius:6px 6px 0 0;font-size:8.4px;font-weight:700;color:#cbd5e1;white-space:nowrap}
+.app-tab.act{background:#f1f5f9;color:var(--blue9);font-weight:800}
+.app-pad{padding:7px}
+.mcard{background:#fff;border:1px solid var(--line);border-radius:10px;padding:7px 8px;margin-bottom:6px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.mcard:last-child{margin-bottom:0}
+.mcard-t{font-weight:800;font-size:9.5px;color:var(--blue9);display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.mcard-sub{font-size:7.8px;color:var(--muted);font-weight:600}
+.kpis3{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:4px;margin-top:4px}
+.kpi{background:#f8fafc;border:1px solid var(--line);border-radius:7px;padding:4px 5px;text-align:center}
+.kpi strong{display:block;font-size:11.5px;font-weight:800;color:var(--blue9);line-height:1.1}
+.kpi span{font-size:7.2px;color:var(--muted);font-weight:700}
+.minput{border:1px solid #cbd5e1;border-radius:7px;padding:5px 7px;background:#fff;color:#64748b;font-size:8.3px;display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.minput.filled{color:var(--ink);font-weight:700;border-color:var(--blue6);background:#f8faff}
+.mlink{color:var(--blue6);font-weight:700;font-size:8px;margin-top:4px;display:inline-block}
+.mbtn-sec{display:block;text-align:center;border:1px dashed #94a3b8;border-radius:7px;padding:4px 6px;font-size:8px;font-weight:700;color:var(--blue9);background:#f8fafc;margin-top:5px}
+.mbtn-pri{display:block;text-align:center;background:var(--or);color:#fff;border-radius:8px;padding:6px 8px;font-size:8.8px;font-weight:800;margin-top:6px}
+.mbtn-blue{display:inline-block;background:var(--blue6);color:#fff;border-radius:6px;padding:3px 7px;font-size:7.8px;font-weight:700}
+.mbtn-out{display:inline-block;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:6px;padding:3px 7px;font-size:7.8px;font-weight:700}
+.mcli{border:1px solid var(--line);border-radius:7px;padding:4px 6px;margin-top:4px;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:4px}
+.mcli.sel{border-color:var(--blue6);background:#eff6ff}
+.mcli b{display:block;font-size:8.2px;color:var(--ink)}
+.mcli small{font-size:7.2px;color:var(--muted);font-weight:600}
+.badge{display:inline-block;padding:1.5px 5px;border-radius:999px;font-size:7.2px;font-weight:800;white-space:nowrap}
+.b-green{background:#dcfce7;color:#15803d}
+.b-or{background:#ffedd5;color:#c2410c}
+.b-gray{background:#e2e8f0;color:#475569}
+.b-blue{background:#dbeafe;color:#1d4ed8}
+.b-purp{background:#f3e8ff;color:#7e22ce}
+.b-amber{background:#fef3c7;color:#b45309}
+.b-red{background:#fee2e2;color:#b91c1c}
+.res-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.res-opt{border:1px solid var(--line);border-radius:7px;padding:4px 5px;text-align:center;font-size:7.8px;font-weight:700;color:#475569;background:#fff}
+.res-opt.act{border-color:var(--good);background:#dcfce7;color:#15803d;font-weight:800}
+.vitem{border-top:1px solid var(--line);padding:5px 0}
+.vitem:first-child{border-top:0;padding-top:2px}
+.vrow{display:flex;justify-content:space-between;align-items:center;gap:4px}
+.vbadges{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px}
+.wait-bar{margin-top:5px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:3px 6px;font-size:7.6px;font-weight:700}
+
+/* maqueta de escritorio */
+.desk-frame{position:relative;border:2px solid #cbd5e1;border-radius:13px;background:#f8fafc;box-shadow:0 14px 28px -18px rgba(15,23,42,.55);overflow:hidden}
+.desk-top{background:#1e3a8a;color:#fff;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:800}
+.desk-top b{color:var(--or)}
+.desk-body{display:grid;grid-template-columns:126px 1fr;min-height:220px}
+.desk-side{background:#0f172a;color:#94a3b8;padding:8px 7px;font-size:8.5px;display:grid;gap:3px;align-content:start}
+.dnav{padding:5px 7px;border-radius:6px;font-weight:600}
+.dnav.act{background:var(--blue6);color:#fff;font-weight:800}
+.desk-main{padding:9px 11px;background:#f8fafc}
+.dtabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:7px}
+.dtab{padding:4px 10px;border-radius:7px;font-size:9px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line)}
+.dtab.act{background:var(--blue9);color:#fff;border-color:var(--blue9)}
+.filters-bar{display:flex;gap:5px;flex-wrap:wrap;align-items:center;background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 8px}
+.fbtn{padding:3px 8px;border-radius:6px;font-size:8.2px;font-weight:700;border:1px solid var(--line);background:#f8fafc;color:var(--ink)}
+.fbtn.act{background:var(--blue6);color:#fff;border-color:var(--blue6)}
+.fdate{padding:2.5px 6px;border-radius:5px;border:1px solid #cbd5e1;background:#fff;font-size:8px;color:var(--ink);font-weight:600}
+.fnote{font-size:7.6px;color:var(--muted);font-weight:700}
+
+/* mapa ilustrado y tabla de monitoreo */
+.map-box{position:relative;height:192px;border-radius:10px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#eef6ee 0%,#e2eef8 52%,#f4efe6 100%);overflow:hidden}
+.map-road{position:absolute;background:rgba(255,255,255,.85);border:1px solid #cbd5e1}
+.mpin{position:absolute;width:13px;height:13px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.45)}
+.mpin.alert{width:16px;height:16px;border:3px solid #dc2626;box-shadow:0 0 0 2px rgba(220,38,38,.25)}
+.mpop{position:absolute;background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:5px 7px;font-size:8px;line-height:1.35;box-shadow:0 6px 14px -6px rgba(15,23,42,.35);width:172px}
+.mpop b{color:var(--blue9);display:block;font-size:8.4px}
+.mtbl{width:100%;border-collapse:collapse;font-size:8.6px;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:8px}
+.mtbl th{background:#f1f5f9;color:var(--muted);font-weight:800;text-align:center;padding:5px 4px;border-bottom:1px solid var(--line);font-size:7.8px}
+.mtbl th:first-child{text-align:left;padding-left:8px}
+.mtbl td{padding:5px 4px;text-align:center;border-bottom:1px solid var(--line);font-weight:600;color:var(--ink)}
+.mtbl td:first-child{text-align:left;padding-left:8px;font-weight:700;color:var(--blue9)}
+.mtbl tr.sel td{background:#eff6ff;color:var(--blue9);font-weight:800}
+.mtbl tr.tot td{background:#f8fafc;font-weight:800;border-top:2px solid #cbd5e1;border-bottom:0;color:var(--blue9)}
+.leg-dots{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:9px;font-size:10.8px;font-weight:600;color:#475569}
+.leg-dots span{display:inline-flex;align-items:center;gap:5px}
+.ldot{width:11px;height:11px;border-radius:50%;display:inline-block;flex:none}
+.ldot.al{background:#fff;border:3px solid #dc2626}
+
+/* cuadro alertas por validar */
+.alert-card{border:1px solid #fecaca;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 8px 18px -14px rgba(185,28,28,.45)}
+.alert-hdr{background:#fef2f2;padding:7px 12px;border-bottom:1px solid #fecaca;display:flex;justify-content:space-between;align-items:center;font-size:10.5px;font-weight:800;color:#991b1b}
+.alert-row{padding:8px 12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:10px}
+.alert-row:first-of-type{border-top:0}
+.alert-row b{color:var(--ink);font-size:10.6px}
+.alert-acts{display:flex;gap:6px;flex:none}
+.abtn-ok{background:#16a34a;color:#fff;border-radius:7px;padding:4px 9px;font-size:9.2px;font-weight:800}
+.abtn-fix{background:#eff6ff;color:var(--blue8);border:1px solid #bfdbfe;border-radius:7px;padding:4px 9px;font-size:9.2px;font-weight:800}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" x2="12.01" y1="18" y2="18"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 4.17-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><line x1="12" x2="12.01" y1="20" y2="20"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></symbol>
+</svg>
+
+<!-- ==================== PÁGINA 1: PORTADA ==================== -->
+<section class="page cover">
+  <div class="cv-top"><div class="logo">COMACA <b>360</b></div><div class="cv-date">NOVIEMBRE 2026</div></div>
+  <div class="cv-main">
+    <p class="eyebrow">Guía práctica de uso</p>
+    <h1>Visitas a clientes</h1>
+    <p class="cv-sub">Todo lo que necesitas saber en dos partes: cómo marcar tus visitas en la calle desde el teléfono y cómo monitorear al equipo desde Administración y Gerencia.</p>
+  </div>
+  <div class="cv-cards">
+    <div class="pc main">
+      <small>Páginas 2 a 5</small><h3>Vendedor</h3>
+      <p>Marca cada visita al llegar con el cliente.</p>
+      <ul>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Visitas es tu primera pantalla al abrir la app</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Funciona aunque te quedes sin señal</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Cada pedido deja su visita marcada sola</span></li>
+      </ul>
+    </div>
+    <div class="pc side">
+      <small>Páginas 6 a 8</small><h3>Administración</h3>
+      <p>Monitorea las visitas de tu equipo en un solo lugar.</p>
+      <ul>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Filtros por día o período de hasta 62 días</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Mapa de colores y tabla por vendedor</span></li>
+        <li><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg><span>Alertas de distancia fáciles de validar</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="cv-pay">
+    <span><svg class="ic" viewBox="0 0 24 24"><use href="#i-phone"/></svg> Teléfono y computador</span>
+    <span><svg class="ic" viewBox="0 0 24 24"><use href="#i-list"/></svg> Paso a paso</span>
+    <span><svg class="ic" viewBox="0 0 24 24"><use href="#i-shield"/></svg> Sin seguimiento continuo</span>
+  </div>
+  <p class="cv-cap">Las pantallas de esta guía son ilustraciones con clientes, vendedores y cifras inventadas.</p>
+  <div class="cv-phones">
+    <div class="pp" style="left:118px;top:22px;transform:rotate(-3.5deg)">
+      <div class="phone-frame" style="width:244px">
+        <div class="phone-screen">
+          <div class="app-bar"><span>COMACA <b>360</b></span><span style="font-size:8px;opacity:.85">Vendedor 007</span></div>
+          <div class="app-tabs"><div class="app-tab act">Visitas</div><div class="app-tab">Mes</div><div class="app-tab">Pedidos</div><div class="app-tab">Rep.Pagos</div></div>
+          <div class="app-pad">
+            <div class="mcard">
+              <div class="mcard-t"><span>Mis visitas de hoy</span><span class="mcard-sub">Jue 26 nov</span></div>
+              <div class="kpis3">
+                <div class="kpi"><strong>9</strong><span>Visitas</span></div>
+                <div class="kpi"><strong>4</strong><span>Con pedido</span></div>
+                <div class="kpi"><strong style="font-size:9.5px">8:15 – 15:40</strong><span>Primera – última</span></div>
+              </div>
+            </div>
+            <div class="mcard">
+              <div class="mcard-t"><span>Nueva visita</span></div>
+              <div class="minput"><span>Busca por nombre o código…</span></div>
+              <div class="mbtn-sec">+ Cliente nuevo (no está en mi cartera)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pp" style="left:416px;top:40px;transform:rotate(3deg)">
+      <div class="phone-frame" style="width:276px;border-radius:16px">
+        <div class="phone-screen" style="border-radius:12px">
+          <div class="app-bar"><span>Monitoreo de visitas</span><span style="font-size:8px;opacity:.85">Admin</span></div>
+          <div class="app-pad">
+            <div style="display:flex;gap:4px;margin-bottom:5px"><span class="fbtn act">Hoy</span><span class="fbtn">Ayer</span><span class="fbtn">Últimos 7 días</span><span class="fbtn">Este mes</span></div>
+            <div class="map-box" style="height:122px">
+              <div class="map-road" style="left:-10px;top:48px;width:300px;height:10px;transform:rotate(-8deg)"></div>
+              <div class="map-road" style="left:112px;top:-10px;width:10px;height:150px;transform:rotate(12deg)"></div>
+              <span class="mpin" style="left:46px;top:36px;background:#16a34a"></span>
+              <span class="mpin" style="left:94px;top:62px;background:#ea580c"></span>
+              <span class="mpin" style="left:148px;top:42px;background:#2563eb"></span>
+              <span class="mpin" style="left:192px;top:78px;background:#64748b"></span>
+              <span class="mpin alert" style="left:222px;top:34px;background:#ea580c"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== PÁGINA 2: VENDEDOR · QUÉ ES Y POR QUÉ ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who ven">Vendedor</span> · Qué es y por qué</span></div>
+  <div class="body">
+    <p class="kicker">Parte 1 · Para el vendedor</p>
+    <h2>Qué son las visitas y dónde las encuentras</h2>
+    <p class="lead">Cada vez que llegas con un cliente, marcas tu visita en la app. Toma unos segundos y deja constancia de tu ruta diaria, incluso cuando el cliente no hizo pedido.</p>
+
+    <div class="feat">
+      <div class="fcard a">
+        <div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-shield"/></svg></div>
+        <h4>Sin seguimiento continuo</h4>
+        <p>La app guarda la hora y la ubicación de tu teléfono <b>solo en el momento exacto en que tocas el botón</b> para marcar la visita. No te rastrea mientras manejas ni fuera de ese toque.</p>
+      </div>
+      <div class="fcard b">
+        <div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-pin"/></svg></div>
+        <h4>Primera pantalla al abrir la app</h4>
+        <p>Ahora, cuando entras con tu usuario, la app abre directo en <b>Visitas</b> para que puedas marcar al instante. Para ver tus indicadores de ventas de siempre, toca <b>Mes</b> en la barra de arriba.</p>
+      </div>
+    </div>
+
+    <div class="two" style="margin-top:16px;--c1:250px">
+      <div>
+        <div class="phone-frame" style="width:246px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>COMACA <b>360</b></span><span style="font-size:8px;opacity:.85">Vendedor Inventado 007</span></div>
+            <div class="app-tabs">
+              <div class="app-tab act">Visitas</div>
+              <div class="app-tab">Mes</div>
+              <div class="app-tab">Pedidos</div>
+              <div class="app-tab">Rep.Pagos</div>
+            </div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>Mis visitas de hoy</span><span class="mcard-sub">Jueves, 26 de nov</span></div>
+                <div class="kpis3">
+                  <div class="kpi"><strong>8</strong><span>Visitas</span></div>
+                  <div class="kpi"><strong>3</strong><span>Con pedido</span></div>
+                  <div class="kpi"><strong style="font-size:9px">8:10 – 15:25</strong><span>Primera – última</span></div>
+                </div>
+              </div>
+              <div class="mcard">
+                <div class="mcard-t"><span>Nueva visita</span></div>
+                <div class="minput"><span>Buscar cliente por nombre o código…</span></div>
+                <div style="font-size:7.6px;color:var(--muted);margin-top:4px">Escribe al menos 2 letras para buscar.</div>
+                <span class="mlink">Ver mis clientes (31)</span>
+                <div class="mbtn-sec">+ Cliente nuevo (no está en mi cartera)</div>
+              </div>
+              <div class="mcard">
+                <div class="mcard-t"><span>Visitas de hoy</span><span class="mcard-sub">8 registros</span></div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 12 C.A.</b><span class="mcard-sub">15:25</span></div>
+                  <div class="vbadges"><span class="badge b-green">Vendió</span><span class="badge b-blue">Con pedido</span></div>
+                </div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 34 C.A.</b><span class="mcard-sub">14:40</span></div>
+                  <div class="vbadges"><span class="badge b-or">No compró</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="pin" style="left:28px;top:24px">A</span>
+          <span class="pin" style="left:75px;top:24px">B</span>
+          <span class="pin" style="left:244px;top:88px">C</span>
+          <span class="pin" style="left:244px;top:175px">D</span>
+        </div>
+        <p class="ilust-lbl">Así se ve al abrir la app (ilustración)</p>
+      </div>
+
+      <div class="sidecol">
+        <h3 class="sh">Cómo moverte desde el primer minuto</h3>
+        <ul class="read">
+          <li><span class="t"><i class="bk">A</i> Pestaña Visitas (primera en tu barra)</span>Es tu pantalla de inicio. Aquí marcas cada visita y ves lo que llevas hecho hoy.</li>
+          <li><span class="t"><i class="bk">B</i> Pestaña Mes (a un solo toque)</span>Tus indicadores de ventas e incentivos siguen exactamente igual: solo toca <b>Mes</b> cuando quieras consultarlos.</li>
+          <li><span class="t"><i class="bk">C</i> Tarjeta «Mis visitas de hoy»</span>Resumen rápido del día: cuántas visitas llevas, cuántas tienen pedido y la hora de la primera y la última.</li>
+          <li><span class="t"><i class="bk">D</i> Tarjeta «Nueva visita»</span>Buscador para elegir al cliente que estás visitando o anotar un cliente nuevo.</li>
+        </ul>
+        <div class="info" style="margin-top:10px"><b>En computador:</b> el menú está a la izquierda y <b>Visitas</b> también aparece primero para ti.</div>
+        <div class="tip" style="margin-top:9px"><b>Por qué conviene marcar todas las visitas:</b> así queda reflejado tu trabajo completo del día, aunque el local esté cerrado o el cliente no compre hoy.</div>
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 2</span></div>
+</section>
+
+<!-- ==================== PÁGINA 3: VENDEDOR · LA PANTALLA ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who ven">Vendedor</span> · Tu pantalla</span></div>
+  <div class="body">
+    <p class="kicker">Parte 1 · Para el vendedor</p>
+    <h2>Las tres partes de tu pantalla de Visitas</h2>
+    <p class="lead">Todo está en una sola pantalla hacia abajo: tu resumen del día, el buscador para marcar una visita nueva y la lista de las visitas que ya hiciste hoy.</p>
+
+    <div class="phones" style="gap:34px;margin-top:14px">
+      <div class="pcol" style="width:264px">
+        <div class="phone-frame" style="width:264px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>COMACA <b>360</b></span><span style="font-size:8px;opacity:.85">Visitas</span></div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>Mis visitas de hoy</span><span class="mcard-sub">Jueves, 26 de nov</span></div>
+                <div class="kpis3">
+                  <div class="kpi"><strong>9</strong><span>Visitas</span></div>
+                  <div class="kpi"><strong>4</strong><span>Con pedido</span></div>
+                  <div class="kpi"><strong style="font-size:9px">8:10 – 15:40</strong><span>Primera – última</span></div>
+                </div>
+                <div class="wait-bar">1 visita esperando señal</div>
+              </div>
+              <div class="mcard">
+                <div class="mcard-t"><span>Nueva visita</span></div>
+                <div class="minput filled"><span>CLI</span><span style="color:var(--muted);font-size:7.5px">✕</span></div>
+                <div class="mcli">
+                  <div><b>CLIENTE INVENTADO 12 C.A.</b><small>001012 · CIUDAD 3</small></div>
+                  <span class="badge b-green">Visitado hoy</span>
+                </div>
+                <div class="mcli">
+                  <div><b>CLIENTE INVENTADO 28 C.A.</b><small>001028 · CIUDAD 3</small></div>
+                </div>
+                <div style="font-size:7.4px;color:var(--muted);margin-top:4px;display:flex;justify-content:space-between">
+                  <span>Ver mis clientes (31)</span><span>Máx. 60 resultados</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="pin" style="left:0px;top:66px">A</span>
+          <span class="pin" style="left:0px;top:166px">B</span>
+          <span class="pin" style="left:260px;top:196px">C</span>
+        </div>
+        <p class="ilust-lbl">Resumen y buscador (ilustración)</p>
+      </div>
+
+      <div class="pcol" style="width:264px">
+        <div class="phone-frame" style="width:264px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>COMACA <b>360</b></span><span style="font-size:8px;opacity:.85">Visitas</span></div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>Visitas de hoy</span><span class="mcard-sub">9 visitas</span></div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 12 C.A.</b><span class="mcard-sub">15:40</span></div>
+                  <div class="vbadges"><span class="badge b-green">Vendió</span><span class="badge b-blue">Con pedido</span></div>
+                </div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 45 C.A.</b><span class="mcard-sub">14:15</span></div>
+                  <div class="vbadges"><span class="badge b-or">No compró</span><span class="badge b-amber">Pendiente de enviar</span></div>
+                </div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 19 C.A.</b><span class="mcard-sub">11:30</span></div>
+                  <div class="vbadges"><span class="badge b-gray">Cerrado / no estaba</span></div>
+                </div>
+                <div class="vitem">
+                  <div class="vrow"><b>CLIENTE INVENTADO 08 C.A.</b><span class="mcard-sub">09:45</span></div>
+                  <div class="vbadges"><span class="badge b-blue">Cobro</span></div>
+                </div>
+                <div class="vitem">
+                  <div class="vrow"><b>NEGOCIO NUEVO INVENTADO 1</b><span class="mcard-sub">08:10</span></div>
+                  <div class="vbadges"><span class="badge b-purp">Otro</span><span class="badge b-gray">Cliente nuevo</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="pin" style="left:0px;top:48px">D</span>
+          <span class="pin" style="left:260px;top:124px">E</span>
+        </div>
+        <p class="ilust-lbl">Lista «Visitas de hoy» (ilustración)</p>
+      </div>
+    </div>
+
+    <div class="tips4" style="margin-top:16px">
+      <div class="tcard"><span class="t"><i class="bk">A</i> Mis visitas de hoy</span>Muestra tu total de <b>Visitas</b> (incluye las pendientes), cuántas son <b>Con pedido</b> y la <b>Primera y última</b> hora.</div>
+      <div class="tcard"><span class="t"><i class="bk">B</i> Buscador inteligente</span>No muestra clientes hasta que escribes <b>2 letras</b> del nombre o del código. Con <b>Ver mis clientes (N)</b> ves la lista completa.</div>
+      <div class="tcard"><span class="t"><i class="bk">C</i> Visitado hoy</span>En el buscador, los clientes que ya visitaste hoy salen con esta etiqueta para que no te confundas.</div>
+      <div class="tcard"><span class="t"><i class="bk">D</i><i class="bk">E</i> Etiquetas claras</span>En <b>Visitas de hoy</b> cada fila muestra el resultado, <b>Con pedido</b> si hubo pedido y <b>Pendiente de enviar</b> si faltó señal.</div>
+    </div>
+
+    <div class="tip" style="margin-top:12px"><b>Tip para buscar más rápido:</b> puedes escribir parte del código del cliente (por ejemplo <b>1012</b> para encontrar <b>001012</b>). Si tu cartera es muy grande, la lista muestra hasta 60 clientes por búsqueda; escribe una letra más para afinar.</div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 3</span></div>
+</section>
+
+<!-- ==================== PÁGINA 4: VENDEDOR · PASO A PASO ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who ven">Vendedor</span> · Paso a paso</span></div>
+  <div class="body">
+    <p class="kicker">Parte 1 · Para el vendedor</p>
+    <h2>Cómo marcar una visita paso a paso</h2>
+    <p class="lead">Hazlo apenas llegues al negocio del cliente para que el GPS tome bien el lugar.</p>
+
+    <div class="phones" style="gap:18px;margin-top:12px">
+      <div class="pcol" style="width:218px">
+        <div class="phone-frame" style="width:218px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>Nueva visita</span><span style="font-size:8px;opacity:.85">Paso 1</span></div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>Elige al cliente</span></div>
+                <div class="minput filled"><span>INVENTADO 12</span></div>
+                <div class="mcli sel">
+                  <div><b>CLIENTE INVENTADO 12 C.A.</b><small>001012 · CIUDAD 3</small></div>
+                </div>
+                <div style="text-align:center;font-size:7.4px;color:var(--muted);margin:5px 0 3px">— o si es un negocio nuevo —</div>
+                <div class="mbtn-sec">+ Cliente nuevo (no está en mi cartera)</div>
+                <div class="minput" style="margin-top:4px;font-size:7.6px"><span>Ej: NEGOCIO NUEVO INVENTADO 2</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap">
+          <h4><span class="n">1</span>Busca al cliente</h4>
+          <p>Escribe al menos <b>2 letras</b> del nombre o del código y tócalo. Si todavía no está en tu cartera, toca <b>Cliente nuevo (no está en mi cartera)</b> y escribe su nombre.</p>
+        </div>
+      </div>
+
+      <div class="pcol" style="width:218px">
+        <div class="phone-frame" style="width:218px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>Nueva visita</span><span style="font-size:8px;opacity:.85">Paso 2</span></div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>CLIENTE INVENTADO 12 C.A.</span></div>
+                <div style="font-size:8px;font-weight:800;color:var(--ink);margin-top:2px">¿Cómo te fue?</div>
+                <div class="res-grid">
+                  <div class="res-opt act">Vendió</div>
+                  <div class="res-opt">No compró</div>
+                  <div class="res-opt">Cerrado / no estaba</div>
+                  <div class="res-opt">Cobro</div>
+                </div>
+                <div class="res-opt" style="margin-top:4px">Otro</div>
+                <div style="font-size:7.8px;font-weight:700;color:var(--muted);margin-top:6px">Nota (opcional)</div>
+                <div class="minput" style="min-height:28px;align-items:flex-start"><span>Ej: Pide cotización para el lunes…</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap">
+          <h4><span class="n">2</span>Resultado y nota</h4>
+          <p>Elige <b>¿Cómo te fue?</b>: Vendió, No compró, Cerrado / no estaba, Cobro u Otro. Si quieres, agrega una <b>nota corta</b> (es opcional).</p>
+        </div>
+      </div>
+
+      <div class="pcol" style="width:218px">
+        <div class="phone-frame" style="width:218px">
+          <div class="phone-screen">
+            <div class="app-bar"><span>Nueva visita</span><span style="font-size:8px;opacity:.85">Paso 3</span></div>
+            <div class="app-pad">
+              <div class="mcard">
+                <div class="mcard-t"><span>CLIENTE INVENTADO 12 C.A.</span></div>
+                <div style="font-size:7.8px;color:#15803d;font-weight:700;background:#dcfce7;padding:4px 6px;border-radius:6px">Resultado: Vendió</div>
+                <div class="mbtn-pri">Marcar visita aquí</div>
+                <div style="margin-top:6px;border-top:1px solid var(--line);padding-top:5px;font-size:7.5px;color:#475569">
+                  <b>Primera vez:</b> el navegador te preguntará si permites usar tu ubicación. Toca <b>Permitir</b>.
+                </div>
+                <div style="margin-top:5px;background:#eff6ff;color:var(--blue8);padding:4px 6px;border-radius:6px;font-size:7.5px;font-weight:700;text-align:center">✓ Visita registrada · 10:22</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap">
+          <h4><span class="n">3</span>Toca «Marcar visita aquí»</h4>
+          <p>La app guarda la hora y tu ubicación de ese instante, limpia el buscador y suma la visita a <b>Visitas de hoy</b>.</p>
+        </div>
+      </div>
+    </div>
+    <p class="ilust-lbl" style="margin-top:6px">Secuencia para registrar una visita (ilustración)</p>
+
+    <div class="info" style="margin-top:12px"><b>Permiso de ubicación (solo la primera vez):</b> al tocar <b>Marcar visita aquí</b>, tu teléfono pedirá permiso para compartir la ubicación con el navegador. Acepta (<b>Permitir</b>) para que tus visitas salgan en el mapa sin problemas.</div>
+
+    <div class="cases" style="margin-top:10px">
+      <div class="case"><span class="cn">1</span><b>Si sale «Sin ubicación»: activa el GPS</b><br>Desliza la barra superior de tu teléfono y comprueba que el ícono de <b>Ubicación</b> esté encendido.</div>
+      <div class="case"><span class="cn">2</span><b>Revisa el candado del navegador</b><br>Toca el <b>candado</b> junto a la dirección web arriba → <b>Permisos</b> → activa <b>Ubicación</b> y recarga la página.</div>
+      <div class="case"><span class="cn">3</span><b>Sal a un lugar abierto</b><br>Dentro de galpones o locales cerrados el GPS tarda. Da unos pasos hacia la puerta y vuelve a marcar.</div>
+    </div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 4</span></div>
+</section>
+
+<!-- ==================== PÁGINA 5: VENDEDOR · SIN SEÑAL Y PEDIDOS ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who ven">Vendedor</span> · Sin señal y pedidos</span></div>
+  <div class="body">
+    <p class="kicker">Parte 1 · Para el vendedor</p>
+    <h2>Si te quedas sin señal y cuando tomas un pedido</h2>
+    <p class="lead">No pierdes ninguna visita aunque no tengas internet, y tampoco tienes que marcar dos veces cuando le tomas un pedido a un cliente.</p>
+
+    <div class="two2" style="margin-top:14px;gap:16px">
+      <div class="fcard a" style="padding:14px 16px">
+        <div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-wifi-off"/></svg></div>
+        <h4>Sin señal: se guarda en tu teléfono</h4>
+        <p>Si marcas una visita en una zona sin datos ni wifi, la visita queda guardada en tu teléfono con la etiqueta <b>Pendiente de enviar</b> y arriba verás el aviso <b>«1 visita esperando señal»</b>.</p>
+        <p style="margin-top:6px">Apenas recuperes señal y abras la app, <b>se envía sola</b> y el aviso desaparece. Si quedó alguna de un día anterior, la app también te avisa aparte.</p>
+        <div class="phone-frame" style="width:100%;margin-top:10px;border-width:3px;border-radius:14px">
+          <div class="phone-screen" style="border-radius:11px;padding:7px">
+            <div class="wait-bar" style="margin-top:0">1 visita esperando señal</div>
+            <div class="mcard" style="margin-top:5px">
+              <div class="vrow"><b>CLIENTE INVENTADO 45 C.A.</b><span class="mcard-sub">14:15</span></div>
+              <div class="vbadges"><span class="badge b-or">No compró</span><span class="badge b-amber">Pendiente de enviar</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="ilust-lbl">Visita guardada sin señal (ilustración)</p>
+      </div>
+
+      <div class="fcard b" style="padding:14px 16px">
+        <div class="fi"><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg></div>
+        <h4>Pedidos: la visita se marca sola</h4>
+        <p>Cada vez que le tomas un pedido a un cliente desde la app, COMACA 360 registra automáticamente la visita de ese día con resultado <b>Vendió</b> y la etiqueta <b>Con pedido</b>.</p>
+        <p style="margin-top:6px">Esa visita suma en tu tarjeta <b>Mis visitas de hoy</b> (en el total y en <b>Con pedido</b>) sin que tengas que marcarla aparte a mano.</p>
+        <div class="phone-frame" style="width:100%;margin-top:10px;border-width:3px;border-radius:14px">
+          <div class="phone-screen" style="border-radius:11px;padding:7px">
+            <div class="mcard">
+              <div class="mcard-t"><span>Visitas de hoy</span><span class="mcard-sub">Con pedido: 4</span></div>
+              <div class="vrow"><b>CLIENTE INVENTADO 12 C.A.</b><span class="mcard-sub">15:40</span></div>
+              <div class="vbadges"><span class="badge b-green">Vendió</span><span class="badge b-blue">Con pedido</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="ilust-lbl">Visita creada por un pedido (ilustración)</p>
+      </div>
+    </div>
+
+    <div class="tip" style="margin-top:14px"><b>Importante cuando no hay señal:</b> <b>NO vuelvas a marcar la misma visita.</b> Si ya aparece como «Pendiente de enviar», está segura en tu teléfono y se enviará sola al volver la conexión.</div>
+
+    <div class="strip" style="margin-top:14px">
+      <h3 class="sh">Resumen rápido del vendedor: marcar en 4 pasos</h3>
+      <div class="steps4">
+        <div><span class="n">1</span>Abre la app en <b>Visitas</b></div>
+        <div><span class="n">2</span>Escribe <b>2 letras</b> o toca <b>Cliente nuevo</b></div>
+        <div><span class="n">3</span>Elige <b>¿Cómo te fue?</b> y nota</div>
+        <div><span class="n">4</span>Toca <b>Marcar visita aquí</b></div>
+      </div>
+    </div>
+
+    <div class="faq" style="margin-top:12px">
+      <h4><svg class="ic" viewBox="0 0 24 24"><use href="#i-help"/></svg> Dudas rápidas del vendedor</h4>
+      <div class="qa"><b>¿Dónde quedaron mis indicadores del mes?</b><span>En la pestaña <b>Mes</b>, justo al lado de Visitas en la barra de arriba. Un solo toque te lleva allí.</span></div>
+      <div class="qa"><b>¿Puedo marcar más de una visita al mismo cliente en el día?</b><span>Sí. En el buscador verás la etiqueta <b>Visitado hoy</b> para avisarte que ya pasaste por ahí.</span></div>
+    </div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 5</span></div>
+</section>
+
+<!-- ==================== PÁGINA 6: ADMINISTRACIÓN · MONITOREO DE VISITAS ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who adm">Administración y Gerencia</span> · Monitoreo</span></div>
+  <div class="body">
+    <p class="kicker adm">Parte 2 · Para Administración y Gerencia</p>
+    <h2>Monitoreo de visitas: filtros y pestañas</h2>
+    <p class="lead">En el computador entra por el menú lateral a <b>Monitoreo de visitas</b>; en el teléfono toca <b>Visitas</b> en la barra de arriba. El administrador ya no marca visitas, solo monitorea. El gerente ve únicamente a su equipo.</p>
+
+    <div class="desk-frame" style="margin-top:12px">
+      <div class="desk-top"><span>COMACA <b>360</b> · Panel de Administración</span><span style="font-size:8.5px;opacity:.85">Usuario: Administración</span></div>
+      <div class="desk-body">
+        <div class="desk-side">
+          <div class="dnav">Indicadores (mes)</div>
+          <div class="dnav">Adm. Pedidos</div>
+          <div class="dnav act">Monitoreo de visitas</div>
+          <div class="dnav">Incentivos</div>
+          <div class="dnav">Pagos reportados</div>
+        </div>
+        <div class="desk-main">
+          <div class="dtabs">
+            <div class="dtab act">Visitas</div>
+            <div class="dtab">Pedidos (GPS)</div>
+          </div>
+          <div class="filters-bar">
+            <span class="fbtn">Hoy</span>
+            <span class="fbtn">Ayer</span>
+            <span class="fbtn act">Últimos 7 días</span>
+            <span class="fbtn">Este mes</span>
+            <span style="font-size:8px;color:var(--muted);font-weight:700;margin-left:4px">Desde</span>
+            <span class="fdate">20/11/2026</span>
+            <span style="font-size:8px;color:var(--muted);font-weight:700">Hasta</span>
+            <span class="fdate">26/11/2026</span>
+            <span class="fnote">Máximo 62 días por consulta</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;font-size:8.4px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-weight:700;color:var(--muted)">Vendedor:</span>
+              <span class="fdate" style="padding:3px 9px">Todos los vendedores ▾</span>
+            </div>
+            <span style="font-weight:800;color:var(--blue9)">342 visitas · En vivo (últimos 7 días)</span>
+          </div>
+          <div style="margin-top:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:8.4px;color:#475569;display:flex;justify-content:space-between;align-items:center">
+            <span><b>Mapa y tabla por vendedor</b> debajo de los filtros (ver página 7).</span>
+            <span class="mbtn-out">Actualizar</span>
+          </div>
+        </div>
+      </div>
+      <span class="pin" style="left:124px;top:98px">A</span>
+      <span class="pin" style="left:196px;top:38px">B</span>
+      <span class="pin" style="left:294px;top:38px">C</span>
+      <span class="pin" style="left:336px;top:71px">D</span>
+      <span class="pin" style="left:624px;top:71px">E</span>
+      <span class="pin" style="left:308px;top:132px">F</span>
+    </div>
+    <p class="ilust-lbl">Pantalla de Monitoreo de visitas en computador (ilustración)</p>
+
+    <div class="tips3" style="margin-top:14px">
+      <div class="tcard"><span class="t"><i class="bk">A</i> Una sola sección</span>En el menú lateral es <b>Monitoreo de visitas</b> (en teléfono, <b>Visitas</b>). Ni el administrador ni el gerente marcan visitas.</div>
+      <div class="tcard"><span class="t"><i class="bk">B</i><i class="bk">C</i> Dos pestañas</span><b>Visitas</b> abre al instante. <b>Pedidos (GPS)</b> se carga solo cuando la abres, para que la pantalla sea mucho más rápida.</div>
+      <div class="tcard"><span class="t"><i class="bk">D</i><i class="bk">E</i> Períodos de hasta 62 días</span>Elige <b>Hoy</b>, <b>Ayer</b>, <b>Últimos 7 días</b>, <b>Este mes</b> o fechas <b>Desde / Hasta</b> (máximo 62 días por consulta).</div>
+    </div>
+
+    <div class="two2" style="margin-top:12px">
+      <div class="info"><b><i class="bk">F</i> Filtro por vendedor y permisos</b><br>El <b>administrador</b> ve todos los vendedores y puede filtrar a uno solo. El <b>gerente</b> ve únicamente a los vendedores de su equipo.</div>
+      <div class="tip"><b>Fechas recientes vs. fechas anteriores</b><br>Los últimos 7 días se actualizan solos. Si consultas fechas más viejas, la pantalla las lee una vez y te muestra la hora y el botón <b>Actualizar</b>.</div>
+    </div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 6</span></div>
+</section>
+
+<!-- ==================== PÁGINA 7: ADMINISTRACIÓN · MAPA Y TABLA ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who adm">Administración y Gerencia</span> · Mapa y tabla</span></div>
+  <div class="body">
+    <p class="kicker adm">Parte 2 · Para Administración y Gerencia</p>
+    <h2>Cómo leer el mapa y la tabla por vendedor</h2>
+    <p class="lead">Cada punto en el mapa representa una visita con GPS, con un color según el resultado. Debajo tienes el resumen de todo el equipo en el período elegido.</p>
+
+    <div class="desk-frame" style="margin-top:10px;padding:10px 11px;background:#fff">
+      <div class="map-box">
+        <div class="map-road" style="left:-20px;top:62px;width:740px;height:14px;transform:rotate(-4deg)"></div>
+        <div class="map-road" style="left:195px;top:-20px;width:14px;height:240px;transform:rotate(14deg)"></div>
+        <div class="map-road" style="left:465px;top:-20px;width:12px;height:240px;transform:rotate(-11deg)"></div>
+        <span class="mpin" style="left:78px;top:46px;background:#16a34a"></span>
+        <span class="mpin" style="left:128px;top:88px;background:#16a34a"></span>
+        <span class="mpin" style="left:162px;top:138px;background:#ea580c"></span>
+        <span class="mpin" style="left:242px;top:52px;background:#2563eb"></span>
+        <span class="mpin" style="left:286px;top:116px;background:#64748b"></span>
+        <span class="mpin" style="left:336px;top:64px;background:#9333ea"></span>
+        <span class="mpin" style="left:392px;top:134px;background:#16a34a"></span>
+        <span class="mpin alert" style="left:452px;top:82px;background:#ea580c"></span>
+        <div class="mpop" style="left:476px;top:44px">
+          <b>CLIENTE INVENTADO 34 C.A.</b>
+          <span>Vendedor Inventado 007 · 25/11 14:40</span><br>
+          <span style="color:#c2410c;font-weight:800">No compró</span> · <span style="color:#b91c1c;font-weight:800">Alerta (320 m)</span>
+        </div>
+      </div>
+
+      <table class="mtbl">
+        <thead>
+          <tr>
+            <th>Vendedor</th><th>Visitas</th><th>Vendió</th><th>No compró</th><th>Cerrado</th><th>Cobro</th><th>Otro</th><th>Con pedido</th><th>Alertas</th><th>Días con visitas</th><th>Prom./día</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="sel">
+            <td>Vendedor Inventado 007</td><td>68</td><td>31</td><td>15</td><td>10</td><td>8</td><td>4</td><td>21</td><td style="color:#b91c1c;font-weight:800">2</td><td>6</td><td>11,3</td>
+          </tr>
+          <tr>
+            <td>Vendedor Inventado 012</td><td>61</td><td>28</td><td>14</td><td>9</td><td>6</td><td>4</td><td>18</td><td>0</td><td>6</td><td>10,2</td>
+          </tr>
+          <tr>
+            <td>Vendedor Inventado 025</td><td>54</td><td>22</td><td>13</td><td>8</td><td>7</td><td>4</td><td>15</td><td style="color:#b91c1c;font-weight:800">1</td><td>5</td><td>10,8</td>
+          </tr>
+          <tr class="tot">
+            <td>Total</td><td>183</td><td>81</td><td>42</td><td>27</td><td>21</td><td>12</td><td>54</td><td style="color:#b91c1c">3</td><td>6</td><td>30,5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="ilust-lbl">Mapa de visitas y tabla por vendedor en un período de varios días (ilustración)</p>
+
+    <div class="leg-dots">
+      <span><i class="ldot" style="background:#16a34a"></i><b>Vendió</b></span>
+      <span><i class="ldot" style="background:#ea580c"></i><b>No compró</b></span>
+      <span><i class="ldot" style="background:#64748b"></i><b>Cerrado</b></span>
+      <span><i class="ldot" style="background:#2563eb"></i><b>Cobro</b></span>
+      <span><i class="ldot" style="background:#9333ea"></i><b>Otro</b></span>
+      <span><i class="ldot al"></i><b>Borde rojo = alerta de distancia</b></span>
+    </div>
+
+    <div class="tips3" style="margin-top:12px">
+      <div class="tcard"><span class="t">Un día vs. varios días</span>Si consultas <b>un solo día</b>, las últimas columnas muestran <b>Primera</b> y <b>Última</b> hora. En <b>varios días</b>, muestran <b>Días con visitas</b> y <b>Prom./día</b>.</div>
+      <div class="tcard"><span class="t">Toca una fila para filtrar</span>Toca el nombre de un vendedor en la tabla para ver <b>solo sus puntos en el mapa</b>. Toca la misma fila otra vez para volver a <b>Todos</b>.</div>
+      <div class="tcard"><span class="t">Todos visibles y fila Total</span>La tabla muestra siempre a todos los vendedores del equipo en el período, más una fila <b>Total</b> al final.</div>
+    </div>
+
+    <div class="info" style="margin-top:10px"><b>Globos del mapa y visitas sin GPS:</b> al tocar cualquier punto ves el cliente, vendedor, resultado y hora (y la fecha si el período es de varios días). Las visitas marcadas sin GPS cuentan en la tabla, pero no aparecen dibujadas en el mapa.</div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 7</span></div>
+</section>
+
+<!-- ==================== PÁGINA 8: ADMINISTRACIÓN · ALERTAS DE DISTANCIA ==================== -->
+<section class="page inner">
+  <div class="ph"><div class="logo">COMACA <b>360</b></div><span class="tag"><span class="who adm">Administración y Gerencia</span> · Alertas</span></div>
+  <div class="body">
+    <p class="kicker adm">Parte 2 · Para Administración y Gerencia</p>
+    <h2>Alertas de distancia y preguntas frecuentes</h2>
+    <p class="lead">Las alertas te avisan cuando una visita se marcó lejos del negocio del cliente. <b>Marcar lejos nunca se impide:</b> la visita se guarda igual y queda señalada para que la revises.</p>
+
+    <div class="cases" style="margin-top:11px">
+      <div class="case"><span class="cn">1</span><b>Primera visita fija el lugar</b><br>La primera visita marcada a mano a un cliente (con buena señal de GPS) guarda su ubicación de referencia.</div>
+      <div class="case"><span class="cn">2</span><b>Cuándo salta la alerta</b><br>En las visitas siguientes, hay alerta si se marca a <b>más de 50 m</b> del cliente, ya descontado el margen de error del GPS (hasta 100 m).</div>
+      <div class="case"><span class="cn">3</span><b>Solo hasta 7 días</b><br>La comparación cerca / lejos se hace en períodos de <b>hasta 7 días</b>. En períodos más largos solo se cuentan las visitas (Alertas muestra «–»).</div>
+    </div>
+
+    <div class="alert-card" style="margin-top:13px">
+      <div class="alert-hdr">
+        <span>Alertas por validar (últimos 7 días)</span>
+        <span class="badge b-red">2 pendientes</span>
+      </div>
+      <div class="alert-row">
+        <div>
+          <b>CLIENTE INVENTADO 34 C.A.</b> · <span style="color:var(--muted)">Vendedor Inventado 007 · 25/11 14:40 · No compró</span><br>
+          <span style="color:#b91c1c;font-weight:700">A 320 m de la ubicación registrada del cliente</span>
+        </div>
+        <div class="alert-acts">
+          <span class="abtn-ok">Validar</span>
+          <span class="abtn-fix">Ubicar cliente aquí</span>
+        </div>
+      </div>
+      <div class="alert-row">
+        <div>
+          <b>CLIENTE INVENTADO 78 C.A.</b> · <span style="color:var(--muted)">Vendedor Inventado 025 · 24/11 11:05 · Cerrado</span><br>
+          <span style="color:#b91c1c;font-weight:700">A 245 m de la ubicación registrada del cliente</span>
+        </div>
+        <div class="alert-acts">
+          <span class="abtn-ok">Validar</span>
+          <span class="abtn-fix">Ubicar cliente aquí</span>
+        </div>
+      </div>
+    </div>
+    <p class="ilust-lbl">Cuadro «Alertas por validar» visible para el administrador (ilustración)</p>
+
+    <div class="two2" style="margin-top:10px">
+      <div class="info"><b>Botón «Validar» (solo administrador)</b><br>Úsalo cuando confirmas que la visita fue real aunque el vendedor la marcó un poco lejos (por ejemplo, en el estacionamiento). Quita la alerta de pendientes.</div>
+      <div class="tip"><b>Botón «Ubicar cliente aquí» (solo administrador)</b><br>Úsalo si el cliente se mudó o su primera ubicación quedó mal tomada. Corrige el punto de referencia del cliente para las próximas visitas.</div>
+    </div>
+
+    <div class="faq" style="margin-top:11px">
+      <h4><svg class="ic" viewBox="0 0 24 24"><use href="#i-help"/></svg> Preguntas frecuentes</h4>
+      <div class="qa"><b>¿El gerente puede validar alertas o corregir ubicaciones?</b><span>No. El gerente ve las alertas de su equipo para hacer seguimiento, pero solo el administrador tiene los botones <b>Validar</b> y <b>Ubicar cliente aquí</b>.</span></div>
+      <div class="qa"><b>¿Por qué en «Este mes» la columna Alertas muestra «–»?</b><span>Porque la comparación de distancia se hace en períodos de hasta 7 días. Aun así, el cuadro <b>Alertas por validar</b> de los últimos 7 días siempre sigue visible abajo.</span></div>
+      <div class="qa"><b>¿Qué pasa si elijo más de 62 días en Desde / Hasta?</b><span>La app ajusta automáticamente la otra fecha para mantener el tope de 62 días por consulta.</span></div>
+      <div class="qa"><b>¿Por qué «Pedidos (GPS)» dice «Cargando pedidos…» al tocarla?</b><span>Para que <b>Monitoreo de visitas</b> abra al instante, los pedidos se cargan únicamente cuando entras a esa pestaña.</span></div>
+    </div>
+  </div>
+  <div class="pf"><span>Guía de visitas a clientes · COMACA 360</span><span>Página 8</span></div>
+</section>
+</body></html>

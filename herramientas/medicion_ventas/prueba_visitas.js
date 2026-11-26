@@ -34,7 +34,10 @@ const FUNCIONES = ['diaLocal', 'horaCorta', 'escaparHtml', 'RESULTADOS_VISITA', 
   'claveClienteVisita', 'etiquetaClienteVisita', 'puntoValido', 'distanciaMetros', 'evaluarDistanciaVisita', 'resumenVerificacion',
   'visitaValidada', 'datosRevisionVisita', 'datosUbicacionAdministrador', 'visitaEsDeMiEquipo', 'restarDiasVisita', 'limpiarVisitaLeida',
   'asegurarUbicacionCliente', 'visitasEnVuelo', 'enviarVisita', 'nuevaIdVisita', 'registrarVisita', 'reintentarColaVisitas',
-  'reintentarTodasLasColasVisitas', 'visitaDePedido'];
+  'reintentarTodasLasColasVisitas', 'visitaDePedido', 'safeGetTime', 'clienteCoincide', 'MAX_DIAS_PERIODO_VISITAS', 'MAX_DIAS_VERIFICAR_VISITAS',
+  'MIN_LETRAS_BUSQUEDA_VISITA', 'diasEntreVisita', 'periodoVisitas', 'ajustarPeriodoVisitas', 'visitasDelPeriodo', 'unirVisitasPorId',
+  'resumenVisitasPorVendedor', 'resumenVisitasDelDia', 'buscarClientesParaVisita', 'LOTE_UBICACIONES', 'LOTES_A_LA_VEZ', 'leerUbicacionesDeClientes',
+  'DIAS_POR_TRAMO_VISITAS', 'TRAMOS_A_LA_VEZ_VISITAS', 'trocearPeriodoVisitas', 'leerVisitasDelPeriodo', 'lecturaDelPeriodo', 'ubicacionesEnBusqueda'];
 execFileSync(process.execPath, [path.join(__dirname, 'extraer.js'), '--extra', FUNCIONES.join(','), '--salida', SALIDA], { stdio: 'inherit' });
 const TEXTO = fs.readFileSync(SALIDA, 'utf8').replace(/\r\n/g, '\n');
 
@@ -518,6 +521,261 @@ const bateria = async (codigo, mostrar) => {
     assert.strictEqual(llamadas, 2, 'solo un reintento');
   });
 
+  await prueba('período del monitoreo: días entre fechas, hoy, ayer, 7 días y el mes (bordes de mes y año)', async () => {
+    const { M } = nuevo();
+    assert.strictEqual(M.diasEntreVisita('2026-11-26', '2026-11-26'), 0);
+    assert.strictEqual(M.diasEntreVisita('2026-11-20', '2026-11-26'), 6);
+    assert.strictEqual(M.diasEntreVisita('2026-12-31', '2027-01-01'), 1);
+    assert.strictEqual(M.diasEntreVisita('2026-11-26', '2026-11-20'), -6);
+    assert.ok(Number.isNaN(M.diasEntreVisita('', '2026-11-26')));
+    assert.ok(Number.isNaN(M.diasEntreVisita('26/11/2026', '2026-11-26')));
+    assert.deepStrictEqual(M.periodoVisitas('hoy', '2026-11-26'), { desde: '2026-11-26', hasta: '2026-11-26' });
+    assert.deepStrictEqual(M.periodoVisitas('ayer', '2026-12-01'), { desde: '2026-11-30', hasta: '2026-11-30' });
+    assert.deepStrictEqual(M.periodoVisitas('7dias', '2026-11-26'), { desde: '2026-11-20', hasta: '2026-11-26' });
+    assert.deepStrictEqual(M.periodoVisitas('7dias', '2027-01-03'), { desde: '2026-12-28', hasta: '2027-01-03' });
+    assert.deepStrictEqual(M.periodoVisitas('mes', '2026-11-26'), { desde: '2026-11-01', hasta: '2026-11-26' });
+    assert.deepStrictEqual(M.periodoVisitas('inventado', '2026-11-26'), { desde: '2026-11-26', hasta: '2026-11-26' });
+    assert.strictEqual(M.MAX_DIAS_VERIFICAR_VISITAS, 7);
+  });
+
+  await prueba('período elegido a mano: queda en orden, no pasa de 62 días y un valor inválido se ignora', async () => {
+    const { M } = nuevo();
+    const p = { desde: '2026-11-20', hasta: '2026-11-26' };
+    assert.deepStrictEqual(M.ajustarPeriodoVisitas(p, 'desde', '2026-11-01'), { desde: '2026-11-01', hasta: '2026-11-26' });
+    // desde después de hasta: hasta se mueve
+    assert.deepStrictEqual(M.ajustarPeriodoVisitas(p, 'desde', '2026-11-28'), { desde: '2026-11-28', hasta: '2026-11-28' });
+    // hasta antes de desde: desde se mueve
+    assert.deepStrictEqual(M.ajustarPeriodoVisitas(p, 'hasta', '2026-11-10'), { desde: '2026-11-10', hasta: '2026-11-10' });
+    // tope: 62 días contando los dos extremos
+    const largo = M.ajustarPeriodoVisitas(p, 'desde', '2026-08-01');
+    assert.deepStrictEqual(largo, { desde: '2026-08-01', hasta: '2026-10-01' });
+    assert.strictEqual(M.diasEntreVisita(largo.desde, largo.hasta) + 1, M.MAX_DIAS_PERIODO_VISITAS);
+    const largo2 = M.ajustarPeriodoVisitas({ desde: '2026-01-01', hasta: '2026-01-01' }, 'hasta', '2026-12-31');
+    assert.deepStrictEqual(largo2, { desde: '2026-10-31', hasta: '2026-12-31' });
+    // justo 62 días: no se toca
+    assert.deepStrictEqual(M.ajustarPeriodoVisitas({ desde: '2026-08-01', hasta: '2026-08-01' }, 'hasta', '2026-10-01'), { desde: '2026-08-01', hasta: '2026-10-01' });
+    // vacío o inválido: el mismo período
+    assert.strictEqual(M.ajustarPeriodoVisitas(p, 'desde', ''), p);
+    assert.strictEqual(M.ajustarPeriodoVisitas(p, 'hasta', 'abc'), p);
+  });
+
+  await prueba('visitas del período y unión sin repetir (gana la última lista)', async () => {
+    const { M } = nuevo();
+    const vs = [{ id: 'a', dia: '2026-11-19' }, { id: 'b', dia: '2026-11-20' }, { id: 'c', dia: '2026-11-26' }, { id: 'd', dia: '2026-11-27' }, { id: 'e', dia: '' }, null];
+    assert.deepStrictEqual(M.visitasDelPeriodo(vs, '2026-11-20', '2026-11-26').map(v => v.id), ['b', 'c']);
+    assert.deepStrictEqual(M.visitasDelPeriodo(null, '2026-11-20', '2026-11-26'), []);
+    const u = M.unirVisitasPorId([{ id: 'a', x: 1 }, { id: 'b', x: 1 }], [{ id: 'a', x: 2 }], null, [{ x: 9 }]);
+    assert.strictEqual(u.length, 2);
+    assert.strictEqual(u.find(v => v.id === 'a').x, 2);
+  });
+
+  await prueba('cantidad de visitas por vendedor: total, resultados, con pedido, días distintos y primera/última', async () => {
+    const { M } = nuevo();
+    const vs = [
+      { vendedorId: '1', vendedorNombre: 'Uno', dia: '2026-11-25', fecha: '2026-11-25T14:00:00.000Z', resultado: 'vendio', origen: 'pedido' },
+      { vendedorId: '1', vendedorNombre: 'Uno', dia: '2026-11-25', fecha: '2026-11-25T12:00:00.000Z', resultado: 'no-compro', origen: 'manual' },
+      { vendedorId: '1', vendedorNombre: 'Uno', dia: '2026-11-26', fecha: '2026-11-26T13:00:00.000Z', resultado: 'vendio', origen: 'manual' },
+      { vendedorId: '2', vendedorNombre: 'Dos', dia: '2026-11-26', fecha: '2026-11-26T15:00:00.000Z', resultado: 'cobro', origen: 'manual' }
+    ];
+    const r = M.resumenVisitasPorVendedor(vs);
+    assert.deepStrictEqual(r.map(x => x.id), ['1', '2']);
+    assert.strictEqual(r[0].total, 3);
+    assert.strictEqual(r[0].conPedido, 1);
+    assert.strictEqual(r[0].dias, 2);
+    assert.strictEqual(r[0].porResultado.vendio, 2);
+    assert.strictEqual(r[0].primera, '2026-11-25T12:00:00.000Z');
+    assert.strictEqual(r[0].ultima, '2026-11-26T13:00:00.000Z');
+    assert.strictEqual(r[1].total, 1);
+    assert.deepStrictEqual(M.resumenVisitasPorVendedor([]), []);
+    // empate: por nombre
+    const e = M.resumenVisitasPorVendedor([{ vendedorId: 'z', vendedorNombre: 'Zeta', dia: 'x' }, { vendedorId: 'a', vendedorNombre: 'Alfa', dia: 'x' }]);
+    assert.deepStrictEqual(e.map(x => x.nombre), ['Alfa', 'Zeta']);
+  });
+
+  await prueba('resumen del día del vendedor: visitas, con pedido, pendientes, primera y última hora', async () => {
+    const { M } = nuevo();
+    const r = M.resumenVisitasDelDia([
+      { fecha: '2026-11-26T15:00:00.000Z', origen: 'pedido', pendiente: false },
+      { fecha: '2026-11-26T12:30:00.000Z', origen: 'manual', pendiente: true },
+      { fecha: '2026-11-26T13:00:00.000Z', origen: 'pedido', pendiente: false },
+      { fecha: 'basura', origen: 'manual' }
+    ]);
+    assert.strictEqual(r.total, 4);
+    assert.strictEqual(r.conPedido, 2);
+    assert.strictEqual(r.pendientes, 1);
+    assert.strictEqual(r.primera, '2026-11-26T12:30:00.000Z');
+    assert.strictEqual(r.ultima, '2026-11-26T15:00:00.000Z');
+    const vacio = M.resumenVisitasDelDia([]);
+    assert.deepStrictEqual(vacio, { total: 0, conPedido: 0, pendientes: 0, primera: null, ultima: null });
+  });
+
+  await prueba('buscador de clientes: nada con menos de 2 letras, busca por nombre o código, tope y "ver todos"', async () => {
+    const { M } = nuevo();
+    const cartera = Array.from({ length: 80 }, (_, i) => ({ idCliente: String(1000 + i).padStart(6, '0'), cliente: 'CLIENTE INVENTADO ' + i, ciudad: 'X' }));
+    cartera.push({ idCliente: '000197', cliente: 'BODEGA LA ESQUINA', ciudad: 'Y' });
+    assert.deepStrictEqual(M.buscarClientesParaVisita(cartera, '', 60, false), { lista: [], total: 0, esperando: true });
+    assert.strictEqual(M.buscarClientesParaVisita(cartera, ' b ', 60, false).esperando, true);
+    const r = M.buscarClientesParaVisita(cartera, 'esquina', 60, false);
+    assert.strictEqual(r.esperando, false);
+    assert.deepStrictEqual(r.lista.map(c => c.idCliente), ['000197']);
+    assert.strictEqual(M.buscarClientesParaVisita(cartera, '197', 60, false).lista[0].cliente, 'BODEGA LA ESQUINA');
+    const muchos = M.buscarClientesParaVisita(cartera, 'inventado', 60, false);
+    assert.strictEqual(muchos.lista.length, 60);
+    assert.strictEqual(muchos.total, 80);
+    const todos = M.buscarClientesParaVisita(cartera, '', 60, true);
+    assert.strictEqual(todos.esperando, false);
+    assert.strictEqual(todos.total, 81);
+    assert.strictEqual(todos.lista.length, 60);
+    assert.strictEqual(M.buscarClientesParaVisita(cartera, 'nadie así', 60, false).total, 0);
+  });
+
+  // Firestore falso para las consultas de lotes y tramos: cuenta cuántas hay en vuelo a la vez, exige como mucho 30 ids por
+  // "in", hace como el emulador (falla con más de 10.000 documentos en una respuesta) y trata getDocs como la caché del SDK
+  // (sin visitas del servidor): solo getDocsFromServer trae las visitas.
+  const instalarLecturas = ({ visitas = [], ubicaciones = {}, fallaLote = () => false, fallaTramo = () => false }) => {
+    const est = { enCurso: 0, maxEnCurso: 0, consultas: [] };
+    const atender = async (q, desdeServidor) => {
+      est.enCurso++; est.maxEnCurso = Math.max(est.maxEnCurso, est.enCurso); est.consultas.push(q);
+      try {
+        await esperar(3);
+        const f = q.filtros;
+        if (f[0].campo === '__name__') {
+          if (f[0].valor.length > 30) throw new Error('"in" admite hasta 30 valores');
+          if (fallaLote(f[0].valor)) throw new Error('el lote falló');
+          return { docs: f[0].valor.filter(id => ubicaciones[id]).map(id => ({ id, data: () => ubicaciones[id] })) };
+        }
+        if (!desdeServidor) return { docs: [] };
+        const d = f.find(x => x.op === '>=').valor;
+        const h = f.find(x => x.op === '<=').valor;
+        if (fallaTramo(d, h)) throw new Error('el tramo falló');
+        const docs = visitas.filter(v => v.dia >= d && v.dia <= h);
+        if (docs.length > 10000) throw new Error('too many pending messagings in the back channel');
+        return { docs: docs.map(v => ({ id: v.id, data: () => v })) };
+      } finally { est.enCurso--; }
+    };
+    globalThis.where = (campo, op, valor) => ({ campo, op, valor });
+    globalThis.documentId = () => '__name__';
+    globalThis.query = (col, ...filtros) => ({ col, filtros });
+    globalThis.getDocs = (q) => atender(q, false);
+    globalThis.getDocsFromServer = (q) => atender(q, true);
+    return est;
+  };
+
+  await prueba('ubicaciones de clientes en lotes de 30 ids y pocos a la vez; un lote que falla se devuelve para reintentar', async () => {
+    const { M } = nuevo();
+    const claves = Array.from({ length: 95 }, (_, i) => 'c' + i);
+    const ubicaciones = {};
+    claves.filter((_, i) => i % 2 === 0).forEach(c => { ubicaciones[c] = { lat: 10, lng: -66, clave: c }; });
+    const est = instalarLecturas({ ubicaciones });
+    const r = await M.leerUbicacionesDeClientes(claves);
+    assert.strictEqual(est.consultas.length, 4, '95 claves = 4 consultas (30, 30, 30, 5)');
+    assert.deepStrictEqual(est.consultas.map(q => q.filtros[0].valor.length), [30, 30, 30, 5]);
+    assert.ok(est.maxEnCurso >= 2, 'los lotes sí van en paralelo: ' + est.maxEnCurso);
+    // con muchos lotes, nunca más de 4 a la vez (número fijo: no depende de la constante del código)
+    const muchas = Array.from({ length: 400 }, (_, i) => 'm' + i);
+    const estMuchas = instalarLecturas({ ubicaciones });
+    await M.leerUbicacionesDeClientes(muchas);
+    assert.strictEqual(estMuchas.consultas.length, 14);
+    assert.ok(estMuchas.maxEnCurso <= 4 && estMuchas.maxEnCurso >= 2, 'como mucho 4 lotes a la vez: ' + estMuchas.maxEnCurso);
+    assert.strictEqual(Object.keys(r.encontradas).length, 48);
+    assert.strictEqual(r.encontradas.c0.clave, 'c0');
+    assert.deepStrictEqual(r.fallidas, []);
+    // un lote falla (el segundo): sus claves vuelven en "fallidas" y el resto sigue llegando
+    const est2 = instalarLecturas({ ubicaciones, fallaLote: (lote) => lote.includes('c30') });
+    const r2 = await M.leerUbicacionesDeClientes(claves);
+    assert.strictEqual(r2.fallidas.length, 30);
+    assert.ok(r2.fallidas.includes('c30') && r2.fallidas.includes('c59'));
+    assert.ok(r2.encontradas.c0 && r2.encontradas.c60 && !r2.encontradas.c30);
+    // nada que leer: ninguna consulta
+    const est3 = instalarLecturas({ ubicaciones });
+    assert.deepStrictEqual(await M.leerUbicacionesDeClientes([]), { encontradas: {}, fallidas: [] });
+    assert.strictEqual(est3.consultas.length, 0);
+  });
+
+  await prueba('período largo: se parte en tramos de 7 días, sin huecos ni solapes (incluye 62 días)', async () => {
+    const { M } = nuevo();
+    const cubre = (desde, hasta) => {
+      const tr = M.trocearPeriodoVisitas(desde, hasta);
+      const dias = [];
+      tr.forEach(x => { for (let d = x.desde; d <= x.hasta; d = M.restarDiasVisita(d, -1)) dias.push(d); });
+      const esperado = [];
+      for (let d = desde; d <= hasta; d = M.restarDiasVisita(d, -1)) esperado.push(d);
+      assert.deepStrictEqual(dias, esperado, 'sin huecos ni solapes ' + desde + '..' + hasta);
+      assert.ok(tr.every(x => M.diasEntreVisita(x.desde, x.hasta) + 1 <= M.DIAS_POR_TRAMO_VISITAS));
+      return tr;
+    };
+    assert.deepStrictEqual(cubre('2026-11-01', '2026-11-26').map(x => x.desde + '/' + x.hasta), ['2026-11-01/2026-11-07', '2026-11-08/2026-11-14', '2026-11-15/2026-11-21', '2026-11-22/2026-11-26']);
+    assert.strictEqual(cubre('2026-11-26', '2026-11-26').length, 1);
+    assert.strictEqual(cubre('2026-11-20', '2026-11-26').length, 1);
+    assert.strictEqual(cubre('2026-11-20', '2026-11-27').length, 2);
+    assert.strictEqual(cubre('2026-09-26', '2026-11-26').length, 9, '62 días = 9 tramos');
+    assert.strictEqual(cubre('2026-12-20', '2027-01-10').length, 4, 'cruza el fin de año');
+    assert.deepStrictEqual(M.trocearPeriodoVisitas('2026-11-26', '2026-11-20'), []);
+    assert.deepStrictEqual(M.trocearPeriodoVisitas('', '2026-11-20'), []);
+  });
+
+  await prueba('visitas de un período largo: se leen del servidor por tramos (una consulta de 16.000 falla en el emulador), todas y sin repetir', async () => {
+    const { M } = nuevo();
+    const visitas = [];
+    for (let i = 0; i < 40; i++) {
+      const dia = M.restarDiasVisita('2026-11-26', 39 - i);
+      for (let k = 0; k < 400; k++) visitas.push({ id: dia + '-' + k, dia, vendedorId: '1', vendedorNombre: 'Uno', resultado: 'vendio', fecha: dia + 'T15:00:00.000Z' });
+    }
+    const est = instalarLecturas({ visitas });
+    const r = await M.leerVisitasDelPeriodo('2026-10-18', '2026-11-26');
+    assert.strictEqual(r.length, 16000, 'todas las visitas del período');
+    assert.strictEqual(new Set(r.map(v => v.id)).size, 16000, 'sin repetidas');
+    assert.ok(est.maxEnCurso <= 3 && est.maxEnCurso >= 2, 'como mucho 3 tramos a la vez (número fijo): ' + est.maxEnCurso);
+    assert.ok(est.consultas.length >= 6, 'varios tramos: ' + est.consultas.length);
+    assert.ok(r.every(v => typeof v.vendedorNombre === 'string' && v.resultado === 'vendio'), 'las visitas llegan saneadas');
+    // un tramo falla: falla todo (nunca un período a medias dado por completo)
+    instalarLecturas({ visitas, fallaTramo: (d) => d === '2026-11-01' });
+    await assert.rejects(M.leerVisitasDelPeriodo('2026-10-18', '2026-11-26'), /el tramo falló/);
+    // sin visitas en el período: lista vacía
+    instalarLecturas({ visitas });
+    assert.deepStrictEqual(await M.leerVisitasDelPeriodo('2025-01-01', '2025-01-05'), []);
+  });
+
+  await prueba('período fuera de la semana: mientras no llegue SU lectura está cargando y no hay visitas (nunca un 0 falso ni datos de otro período)', async () => {
+    const { M } = nuevo();
+    const semana = { visitas: [{ id: 'a', dia: '2026-11-25' }, { id: 'b', dia: '2026-11-26' }], cargando: false, error: false };
+    const base = { semana, desde: '2026-11-01', hasta: '2026-11-26', clave: '2026-11-01|2026-11-26' };
+    // el primer cuadro tras cambiar de período: el estado de la lectura anterior (vacío, sin cargar, de OTRO período)
+    const vacioAnterior = { visitas: [], cargando: false, error: false, hora: null, clave: '' };
+    let r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: vacioAnterior });
+    assert.deepStrictEqual(r, { cargando: true, error: false, visitas: [] });
+    // lectura de otro período (con datos y con error): no se muestra ni su dato ni su error
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [{ id: 'z' }], cargando: false, error: true, clave: '2026-10-01|2026-10-31' } });
+    assert.deepStrictEqual(r, { cargando: true, error: false, visitas: [] });
+    // su lectura en curso
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [], cargando: true, error: false, clave: base.clave } });
+    assert.strictEqual(r.cargando, true);
+    // su lectura lista
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [{ id: 'x' }, { id: 'y' }], cargando: false, error: false, clave: base.clave } });
+    assert.deepStrictEqual(r, { cargando: false, error: false, visitas: [{ id: 'x' }, { id: 'y' }] });
+    // su lectura con error
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [], cargando: false, error: true, clave: base.clave } });
+    assert.deepStrictEqual(r, { cargando: false, error: true, visitas: [] });
+    // dentro de la semana: manda la escucha en vivo y se filtra por período
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: true, desde: '2026-11-26', hasta: '2026-11-26', aparte: vacioAnterior });
+    assert.deepStrictEqual(r.visitas.map(v => v.id), ['b']);
+    assert.strictEqual(r.cargando, false);
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: true, semana: { visitas: [], cargando: true, error: true }, aparte: vacioAnterior });
+    assert.strictEqual(r.cargando, true);
+    assert.strictEqual(r.error, true);
+  });
+
+  await prueba('ubicaciones de clientes: se está buscando hasta que termine la búsqueda de ESTA lista (y solo si se verifica)', async () => {
+    const { M } = nuevo();
+    const lista = [{ id: 'a' }];
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: null }), true);
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: [{ id: 'a' }] }), true, 'otra lista, aunque igual: aún no terminó');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: lista }), false);
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: false, candidatas: lista, procesadas: null }), false, 'sin verificar no hay nada que esperar');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: [], procesadas: null }), false, 'sin visitas no hay nada que buscar');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: undefined, procesadas: null }), false);
+  });
+
   await prueba('textos del mapa escapados y resultados conocidos', async () => {
     const { M } = nuevo();
     assert.strictEqual(M.escaparHtml(`<b onclick="x">'&`), '&lt;b onclick=&quot;x&quot;&gt;&#39;&amp;');
@@ -542,9 +800,12 @@ const estatico = () => {
     html.includes("globalActiveTab === 'visitas-vendedor' && hasPerm('visitas-vendedor') && <VisitasVendedorView") &&
     html.includes('<NavBtn id="visitas-vendedor"') && html.includes("[['visitas-vendedor', 'Visitas']]") &&
     html.includes("if (id === 'visitas-vendedor') return rol === 'vendedor';") && html.includes("case 'visitas-vendedor': return { cartera: propio };"));
-  chequear('el mapa lee las visitas de la semana (alertas) y, si el día es más viejo, solo ese día',
+  chequear('el monitoreo escucha la semana en vivo (alertas) y lee UNA vez un período que se sale de ella',
     /query\(collection\(db, getCollectionPath\('visitas'\)\), where\('dia', '>=', desdeSemana\)\)/.test(html) &&
-    /query\(collection\(db, getCollectionPath\('visitas'\)\), where\('dia', '==', dia\)\)/.test(html));
+    /leerVisitasDelPeriodo\(desde, hasta\)\n\s+\.then\(visitas => \{ if \(activo\) setAparte\(\{ visitas, cargando: false, error: false/.test(html) &&
+    html.includes("await getDocsFromServer(query(collection(db, getCollectionPath('visitas')), where('dia', '>=', tramos[i].desde), where('dia', '<=', tramos[i].hasta)))") &&
+    !/getDocs\(q\)/.test(html) &&
+    /runTransaction, getDocs, getDocsFromServer, documentId \} from 'firebase\/firestore'/.test(html));
   chequear('el vendedor lee solo sus visitas de hoy', /where\('vendedorId', '==', vendedorId\), where\('dia', '==', hoy\)/.test(html));
   chequear('se reintenta la cola de todos al abrir, al volver la señal y cada 2 minutos', /reintentarTodasLasColasVisitas\(\)[\s\S]{0,200}addEventListener\('online', reintentar\)[\s\S]{0,120}setInterval\(reintentar, 120000\)/.test(html));
   const iMarcar = html.indexOf('const marcar = async () => {');
@@ -554,9 +815,67 @@ const estatico = () => {
   chequear('cliente nuevo: botón, formulario, cruce con la cartera sin tildes y marca en la visita',
     html.includes('Cliente nuevo (no está en mi cartera)') && html.includes('clienteNuevo: !!cliente.nuevo,') && html.includes('textoParaClave(c.cliente) === textoParaClave(nombreNuevo)'));
   chequear('solo el administrador valida alertas y corrige la ubicación', html.includes("const esAdmin = currentUser.rol === 'admin';") && /\{esAdmin && \(\s+<div className="flex gap-2 shrink-0">\s+<button onClick=\{\(\) => validar\(v\)\}[\s\S]{0,400}ubicarClienteAqui\(v\)/.test(html));
-  chequear('el mapa lee la ubicación de cada cliente con getDoc y marca la alerta', /getDoc\(doc\(db, getCollectionPath\('clientesUbicacion'\), c\)\)/.test(html) && html.includes("filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v))"));
+  chequear('el mapa lee la ubicación de los clientes EN LOTES (no un getDoc por cliente) y marca la alerta',
+    html.includes('leerUbicacionesDeClientes(faltan).then(({ encontradas, fallidas }) => {') && html.includes("where(documentId(), 'in', lote)") &&
+    !/getDoc\(doc\(db, getCollectionPath\('clientesUbicacion'\), c\)\)/.test(html) && html.includes("filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v))"));
   chequear('la ubicación del cliente se fija en una transacción (sin pisar) y solo con visitas manuales', /runTransaction\(db, async \(tx\) => \{\n\s+const existente = await tx\.get\(ref\);\n\s+if \(existente\.exists\(\)\) return false;/.test(html) && html.includes("if (visita.origen === 'pedido') return false;"));
   chequear('el globo del mapa de pedidos escapa los textos', html.includes("[${escaparHtml(p.clienteId || 'S/N')}] ${escaparHtml(p.clienteNombre)}") && html.includes('Vendedor: ${escaparHtml(p.vendedorNombre)}'));
+
+  chequear('administración y gerencia no marcan visitas (solo el rol vendedor tiene "visitas-vendedor")',
+    html.includes("if (!user) return false;\n                // Las visitas se marcan solo desde una cuenta de vendedor") &&
+    html.includes("if (id === 'visitas-vendedor' && user.rol !== 'vendedor') return false;") &&
+    html.includes('const miCartera = useMemo(() => filtrarCarteraPorVendedor(cartera, currentUser.id), [cartera, currentUser]);'));
+  chequear('los vendedores abren la app en Visitas (los tres sitios usan pestanaInicial)',
+    html.includes("const pestanaInicial = (user) => (hasPermForUser('visitas-vendedor', user) ? 'visitas-vendedor' :") &&
+    (html.match(/const firstTab = pestanaInicial\((userToLogin|savedUser|currentUser)\);/g) || []).length === 3 &&
+    !/const firstTab = PREFERRED_TABS\.find/.test(html));
+  chequear('Visitas va primero en el menú y en la barra del teléfono',
+    html.includes('<nav className="flex-1 px-4 space-y-1 pb-4">\n                            {hasPerm(\'visitas-vendedor\') && <NavBtn id="visitas-vendedor"') &&
+    /\[\n\s+\.\.\.\(hasPerm\('visitas-vendedor'\) \? \[\['visitas-vendedor', 'Visitas'\]\] : \[\]\),\n\s+\.\.\.\(hasPerm\('ventas-global'\)/.test(html) &&
+    (html.match(/<NavBtn id="visitas-vendedor"/g) || []).length === 1);
+  chequear('"Monitoreo de visitas" no pide los pedidos al entrar; solo al abrir "Pedidos (GPS)"',
+    html.includes("case 'gerente-mapa': return {};") && html.includes("useEffect(() => { if (vista === 'pedidos' && pedirPedidos) pedirPedidos(); }, [vista]);") &&
+    html.includes("const pedirPedidos = () => setNecesidades(prev => unirNecesidades(prev, { pedidos: 'completo' }));") &&
+    html.includes("pedidosListos={necesidades.pedidos === 'completo' && listos.pedidos === 'completo:' + currentUser.id} pedirPedidos={pedirPedidos}") &&
+    html.includes('Cargando pedidos…'));
+  chequear('el mapa de visitas dibuja en canvas (miles de puntos en un período largo)', html.includes('window.L.map(mapContainerRef.current, { preferCanvas: true })'));
+  chequear('cerca/lejos solo en períodos de hasta 7 días; las alertas siempre con la semana',
+    html.includes("const verificable = Number.isFinite(diasPeriodo) && diasPeriodo <= MAX_DIAS_VERIFICAR_VISITAS;") &&
+    html.includes("const evaluar = (v) => (verificable ? evaluarReal(v) : { estado: 'no-verificada' });") &&
+    html.includes('.map(v => ({ v, ev: evaluarReal(v) }))'));
+  chequear('el vendedor ve el resumen del día y busca al cliente (sin la cartera entera)',
+    html.includes('const resumenDia = useMemo(() => resumenVisitasDelDia(visitasHoy), [visitasHoy]);') &&
+    html.includes('buscarClientesParaVisita(miCartera, busqueda, LIMITE_LISTA, verTodos)') && html.includes('{busquedaClientes.lista.map((c, idx) => {'));
+  chequear('"hoy" se actualiza solo (visibilitychange y cada 60 s) en la pantalla del vendedor y en el monitoreo',
+    html.includes("const useDiaActual = () => {") && html.includes("document.addEventListener('visibilitychange', revisar);") && html.includes('setInterval(revisar, 60000)') &&
+    html.includes("const vendedorId = String(currentUser.id);\n            const hoy = useDiaActual();") &&
+    html.includes("const hoy = useDiaActual();\n            const desdeSemana = restarDiasVisita(hoy, 6);") &&
+    !/const hoy = diaLocal\(\);\n\s+const desdeSemana/.test(html));
+  chequear('las fechas del monitoreo no pasan de hoy y avisan del máximo de 62 días',
+    html.includes('<input type="date" value={desde} max={hoy}') && html.includes('<input type="date" value={hasta} max={hoy}') && html.includes('Máximo {MAX_DIAS_PERIODO_VISITAS} días por consulta'));
+  chequear('nombres: "Monitoreo de visitas" en el menú y "Visitas" en la barra del teléfono',
+    html.includes('icon={MapIcon}>Monitoreo de visitas</NavBtn>') && html.includes("[['gerente-mapa', 'Visitas']]") && html.includes("{ id: 'gerente-mapa', label: 'Monitoreo de Visitas' }"));
+
+  chequear('el mapa se entera de su tamaño real (alto 0 al crearse: en canvas no dibujaba nada) y el globo se arma al tocar',
+    html.includes('observador = new ResizeObserver(avisarTamano); observador.observe(mapContainerRef.current);') && html.includes('m.invalidateSize();') &&
+    html.includes("marca.once('click', () => { marca.bindPopup(") && html.includes('</div>' + String.fromCharCode(96) + ').openPopup(); });'));
+  chequear('los períodos rápidos (hoy, ayer, 7 días, mes) siguen a "hoy" si cambia el día',
+    html.includes("const periodo = seleccion.clave ? periodoVisitas(seleccion.clave, hoy) : { desde: seleccion.desde, hasta: seleccion.hasta };") &&
+    html.includes('onClick={() => setPeriodo(periodoVisitas(k, hoy), k)}') && html.includes("setSeleccion({ clave: clave || '', desde: p.desde, hasta: p.hasta })"));
+  chequear('las filas de la tabla del monitoreo también se usan con el teclado',
+    html.includes('role="button" tabIndex={0} aria-pressed={vendedorEfectivo === r.id}') && html.includes("if (e.key === 'Enter' || e.key === ' ')"));
+
+  chequear('el monitoreo sabe a qué período corresponde la lectura (clave) y no muestra un 0 falso al cambiar de período',
+    html.includes("const lectura = useMemo(() => lecturaDelPeriodo({ periodoEnSemana, semana, aparte, clave: clavePeriodo, desde, hasta }),") &&
+    html.includes("const { cargando, error: errorLectura, visitas: visitasPeriodo } = lectura;") &&
+    (html.match(/hora: null, clave: ''/g) || []).length === 2 && (html.match(/hora: null, clave: clavePeriodo/g) || []).length === 2 &&
+    html.includes("hora: new Date().toISOString(), clave: clavePeriodo") && html.includes('aparte.clave !== clavePeriodo) ? [] : aparte.visitas'));
+  chequear('mientras llegan las ubicaciones se dice "Comparando…" y la columna Alertas muestra "…" (no 0 cerca · 0 lejos)',
+    html.includes("const buscandoUbicaciones = ubicacionesEnBusqueda({ verificable, candidatas: candidatasAlerta, procesadas: ubicProcesadas });") &&
+    (html.match(/setUbicProcesadas\(candidatasAlerta\)/g) || []).length === 2 &&
+    html.includes('visibles.length > 0 && verificable && buscandoUbicaciones &&') && html.includes('Comparando con la ubicación de los clientes…') &&
+    html.includes('visibles.length > 0 && verificable && !buscandoUbicaciones &&') &&
+    html.includes('buscandoUbicaciones ? <span className="text-slate-400">…</span>') && html.includes("(buscandoUbicaciones ? '…' : totales.alertas)"));
   const crudas = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']');
   chequear('no quedan marcas de tilde "crudas" en el código (se escriben con String.fromCharCode)', !crudas.test(html));
   chequear('no quedan mapas de CARTO (ahora pide clave)', !html.includes('basemaps.cartocdn.com') && (html.match(/agregarFondoMapa\(mapRef\.current\)/g) || []).length === 2);
@@ -614,6 +933,34 @@ const estatico = () => {
     ['GPS sin tiempo de espera propio', cambiar('temporizador = setTimeout(', 'temporizador = null && setTimeout(')],
     ['el GPS no se reintenta', cambiar('if (!err || (err.code !== 2 && err.code !== 3)) throw err;', 'throw err;')],
     ['el GPS se reintenta aunque el permiso esté denegado', cambiar('if (!err || (err.code !== 2 && err.code !== 3)) throw err;', 'if (!err) throw err;')],
+    ['el período pasa de 62 días', cambiar('const tope = MAX_DIAS_PERIODO_VISITAS - 1;', 'const tope = MAX_DIAS_PERIODO_VISITAS;')],
+    ['el período queda al revés', cambiar('if (diasEntreVisita(desde, hasta) < 0) hasta = desde;', 'if (false) hasta = desde;')],
+    ['un valor inválido rompe el período', cambiar('if (!Number.isFinite(diasEntreVisita(valor, valor))) return periodo;', '')],
+    ['los días entre fechas se miden en horas', cambiar('/ 86400000);', '/ 3600000);')],
+    ['7 días son 8', cambiar("if (clave === '7dias') return { desde: restarDiasVisita(hoy, 6), hasta: hoy };", "if (clave === '7dias') return { desde: restarDiasVisita(hoy, 7), hasta: hoy };")],
+    ['el mes empieza hoy', cambiar("return { desde: String(hoy).slice(0, 8) + '01', hasta: hoy };", 'return { desde: hoy, hasta: hoy };')],
+    ['el período incluye el día siguiente', cambiar('v.dia >= desde && v.dia <= hasta', 'v.dia >= desde && v.dia <= restarDiasVisita(hasta, -1)')],
+    ['la unión de visitas repite', cambiar('if (v && v.id) m.set(v.id, v);', 'if (v && v.id) m.set(v.id + m.size, v);')],
+    ['días con visitas cuenta visitas', cambiar('if (v.dia) r.dias.add(v.dia);', 'r.dias.add(r.total);')],
+    ['con pedido cuenta todas', cambiar("if (v.origen === 'pedido') r.conPedido += 1;", 'r.conPedido += 1;')],
+    ['resumen del día sin pendientes', cambiar('pendientes: lista.filter(v => v.pendiente).length,', 'pendientes: 0,')],
+    ['resumen del día: primera es la última', cambiar('if (primera === null || t < safeGetTime(primera)) primera = v.fecha;', 'primera = v.fecha;')],
+    ['el buscador muestra toda la cartera sin escribir', cambiar('if (!verTodos && q.length < MIN_LETRAS_BUSQUEDA_VISITA)', 'if (false)')],
+    ['el buscador sin tope', cambiar('lista: todos.slice(0, limite)', 'lista: todos')],
+    ['lotes de 31 ids (Firestore admite 30)', cambiar('const LOTE_UBICACIONES = 30;', 'const LOTE_UBICACIONES = 31;')],
+    ['todos los lotes de ubicaciones a la vez', cambiar('const LOTES_A_LA_VEZ = 4;', 'const LOTES_A_LA_VEZ = 100;')],
+    ['un lote de ubicaciones fallido se da por leído', cambiar('} catch (e) { fallidas.push(...lote); }', '} catch (e) { }')],
+    ['tramos de 30 días', cambiar('const DIAS_POR_TRAMO_VISITAS = 7;', 'const DIAS_POR_TRAMO_VISITAS = 30;')],
+    ['tramos que se solapan un día', cambiar('Math.min(i + dias - 1, total)', 'Math.min(i + dias, total)')],
+    ['todos los tramos de visitas a la vez', cambiar('const TRAMOS_A_LA_VEZ_VISITAS = 3;', 'const TRAMOS_A_LA_VEZ_VISITAS = 50;')],
+    ['un tramo de visitas fallido se ignora', cambiar('} catch (e) { fallo = true; throw e; }', '} catch (e) { resultados[i] = []; }')],
+    ['las visitas del período salen de la caché', cambiar('await getDocsFromServer(', 'await getDocs(')],
+    ['el último tramo se pierde', cambiar('for (let i = 0; i <= total; i += dias) {', 'for (let i = 0; i < total; i += dias) {')],
+    ['el período muestra la lectura de otro período', cambiar('const esDeEste = aparte.clave === clave;', 'const esDeEste = true;')],
+    ['el error de otro período se muestra', cambiar('error: esDeEste && aparte.error', 'error: aparte.error')],
+    ['el período no figura como cargando hasta su lectura', cambiar('cargando: !esDeEste || aparte.cargando', 'cargando: aparte.cargando')],
+    ['nunca se espera a las ubicaciones', cambiar('!!verificable && (candidatas || []).length > 0 && procesadas !== candidatas', 'false')],
+    ['siempre se espera a las ubicaciones', cambiar('(candidatas || []).length > 0 && procesadas !== candidatas', '(candidatas || []).length > 0')],
     ['GPS sin código de error de permiso', cambiar('err => fin(reject, err),', 'err => fin(reject, new Error("x")),')]
   ];
   let detectados = 0;
