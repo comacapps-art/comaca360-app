@@ -134,7 +134,7 @@ import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferred
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction, getDocs, getDocsFromServer, documentId } from 'firebase/firestore';
 import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft, Award, Paperclip } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
@@ -1542,13 +1542,236 @@ const visitaDePedido = ({
   origen: 'pedido',
   pedidoId: pedidoId || null
 });
+const MAX_DIAS_PERIODO_VISITAS = 62;
+const MAX_DIAS_VERIFICAR_VISITAS = 7;
+const MIN_LETRAS_BUSQUEDA_VISITA = 2;
+const diasEntreVisita = (desde, hasta) => {
+  const f = d => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''));
+    return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : NaN;
+  };
+  return Math.round((f(hasta) - f(desde)) / 86400000);
+};
+const periodoVisitas = (clave, hoy) => {
+  if (clave === 'ayer') {
+    const a = restarDiasVisita(hoy, 1);
+    return {
+      desde: a,
+      hasta: a
+    };
+  }
+  if (clave === '7dias') return {
+    desde: restarDiasVisita(hoy, 6),
+    hasta: hoy
+  };
+  if (clave === 'mes') return {
+    desde: String(hoy).slice(0, 8) + '01',
+    hasta: hoy
+  };
+  return {
+    desde: hoy,
+    hasta: hoy
+  };
+};
+const ajustarPeriodoVisitas = (periodo, cambio, valor) => {
+  if (!Number.isFinite(diasEntreVisita(valor, valor))) return periodo;
+  let desde = periodo.desde;
+  let hasta = periodo.hasta;
+  const tope = MAX_DIAS_PERIODO_VISITAS - 1;
+  if (cambio === 'desde') {
+    desde = valor;
+    if (diasEntreVisita(desde, hasta) < 0) hasta = desde;else if (diasEntreVisita(desde, hasta) > tope) hasta = restarDiasVisita(desde, -tope);
+  } else {
+    hasta = valor;
+    if (diasEntreVisita(desde, hasta) < 0) desde = hasta;else if (diasEntreVisita(desde, hasta) > tope) desde = restarDiasVisita(hasta, tope);
+  }
+  return {
+    desde,
+    hasta
+  };
+};
+const visitasDelPeriodo = (visitas, desde, hasta) => (visitas || []).filter(v => v && v.dia && v.dia >= desde && v.dia <= hasta);
+const unirVisitasPorId = (...listas) => {
+  const m = new Map();
+  listas.forEach(l => (l || []).forEach(v => {
+    if (v && v.id) m.set(v.id, v);
+  }));
+  return Array.from(m.values());
+};
+const resumenVisitasPorVendedor = visitas => {
+  const m = new Map();
+  (visitas || []).forEach(v => {
+    if (!m.has(v.vendedorId)) m.set(v.vendedorId, {
+      id: v.vendedorId,
+      nombre: v.vendedorNombre || v.vendedorId,
+      total: 0,
+      conPedido: 0,
+      porResultado: {},
+      primera: null,
+      ultima: null,
+      dias: new Set()
+    });
+    const r = m.get(v.vendedorId);
+    r.total += 1;
+    if (v.origen === 'pedido') r.conPedido += 1;
+    r.porResultado[v.resultado] = (r.porResultado[v.resultado] || 0) + 1;
+    if (v.dia) r.dias.add(v.dia);
+    if (!r.primera || safeGetTime(v.fecha) < safeGetTime(r.primera)) r.primera = v.fecha;
+    if (!r.ultima || safeGetTime(v.fecha) > safeGetTime(r.ultima)) r.ultima = v.fecha;
+  });
+  return Array.from(m.values()).map(r => ({
+    ...r,
+    dias: r.dias.size
+  })).sort((a, b) => b.total - a.total || String(a.nombre).localeCompare(String(b.nombre)));
+};
+const resumenVisitasDelDia = visitas => {
+  const lista = visitas || [];
+  let primera = null;
+  let ultima = null;
+  lista.forEach(v => {
+    const t = safeGetTime(v.fecha);
+    if (!t) return;
+    if (primera === null || t < safeGetTime(primera)) primera = v.fecha;
+    if (ultima === null || t > safeGetTime(ultima)) ultima = v.fecha;
+  });
+  return {
+    total: lista.length,
+    conPedido: lista.filter(v => v.origen === 'pedido').length,
+    pendientes: lista.filter(v => v.pendiente).length,
+    primera,
+    ultima
+  };
+};
+const buscarClientesParaVisita = (cartera, texto, limite, verTodos) => {
+  const q = String(texto || '').trim();
+  if (!verTodos && q.length < MIN_LETRAS_BUSQUEDA_VISITA) return {
+    lista: [],
+    total: 0,
+    esperando: true
+  };
+  const todos = (cartera || []).filter(c => clienteCoincide(c, q));
+  return {
+    lista: todos.slice(0, limite),
+    total: todos.length,
+    esperando: false
+  };
+};
+const useDiaActual = () => {
+  const [dia, setDia] = useState(() => diaLocal());
+  useEffect(() => {
+    const revisar = () => setDia(prev => {
+      const ahora = diaLocal();
+      return ahora === prev ? prev : ahora;
+    });
+    const intervalo = setInterval(revisar, 60000);
+    document.addEventListener('visibilitychange', revisar);
+    return () => {
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', revisar);
+    };
+  }, []);
+  return dia;
+};
+const LOTE_UBICACIONES = 30;
+const LOTES_A_LA_VEZ = 4;
+const leerUbicacionesDeClientes = async claves => {
+  const encontradas = {};
+  const fallidas = [];
+  const lotes = [];
+  for (let i = 0; i < claves.length; i += LOTE_UBICACIONES) lotes.push(claves.slice(i, i + LOTE_UBICACIONES));
+  let siguiente = 0;
+  const trabajador = async () => {
+    while (siguiente < lotes.length) {
+      const lote = lotes[siguiente++];
+      try {
+        const snap = await getDocs(query(collection(db, getCollectionPath('clientesUbicacion')), where(documentId(), 'in', lote)));
+        snap.docs.forEach(d => {
+          encontradas[d.id] = d.data();
+        });
+      } catch (e) {
+        fallidas.push(...lote);
+      }
+    }
+  };
+  await Promise.all(Array.from({
+    length: Math.min(LOTES_A_LA_VEZ, lotes.length)
+  }, trabajador));
+  return {
+    encontradas,
+    fallidas
+  };
+};
+const DIAS_POR_TRAMO_VISITAS = 7;
+const TRAMOS_A_LA_VEZ_VISITAS = 3;
+const trocearPeriodoVisitas = (desde, hasta, dias = DIAS_POR_TRAMO_VISITAS) => {
+  const total = diasEntreVisita(desde, hasta);
+  const tramos = [];
+  if (!Number.isFinite(total) || total < 0) return tramos;
+  for (let i = 0; i <= total; i += dias) {
+    tramos.push({
+      desde: restarDiasVisita(desde, -i),
+      hasta: restarDiasVisita(desde, -Math.min(i + dias - 1, total))
+    });
+  }
+  return tramos;
+};
+const leerVisitasDelPeriodo = async (desde, hasta) => {
+  const tramos = trocearPeriodoVisitas(desde, hasta);
+  const resultados = new Array(tramos.length);
+  let siguiente = 0;
+  let fallo = false;
+  const trabajador = async () => {
+    while (!fallo && siguiente < tramos.length) {
+      const i = siguiente++;
+      try {
+        const snap = await getDocsFromServer(query(collection(db, getCollectionPath('visitas')), where('dia', '>=', tramos[i].desde), where('dia', '<=', tramos[i].hasta)));
+        resultados[i] = snap.docs.map(d => limpiarVisitaLeida({
+          ...d.data(),
+          id: d.id
+        }));
+      } catch (e) {
+        fallo = true;
+        throw e;
+      }
+    }
+  };
+  await Promise.all(Array.from({
+    length: Math.min(TRAMOS_A_LA_VEZ_VISITAS, tramos.length)
+  }, trabajador));
+  return resultados.flat();
+};
+const lecturaDelPeriodo = ({
+  periodoEnSemana,
+  semana,
+  aparte,
+  clave,
+  desde,
+  hasta
+}) => {
+  if (periodoEnSemana) return {
+    cargando: semana.cargando,
+    error: semana.error,
+    visitas: visitasDelPeriodo(semana.visitas, desde, hasta)
+  };
+  const esDeEste = aparte.clave === clave;
+  return {
+    cargando: !esDeEste || aparte.cargando,
+    error: esDeEste && aparte.error,
+    visitas: esDeEste ? aparte.visitas : []
+  };
+};
+const ubicacionesEnBusqueda = ({
+  verificable,
+  candidatas,
+  procesadas
+}) => !!verificable && (candidatas || []).length > 0 && procesadas !== candidatas;
 const VisitasVendedorView = ({
   currentUser,
   cartera,
   openModal
 }) => {
   const vendedorId = String(currentUser.id);
-  const hoy = diaLocal();
+  const hoy = useDiaActual();
   const [busqueda, setBusqueda] = useState('');
   const [nuevoAbierto, setNuevoAbierto] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState('');
@@ -1561,6 +1784,7 @@ const VisitasVendedorView = ({
   const [leyendo, setLeyendo] = useState(true);
   const [errorLectura, setErrorLectura] = useState(false);
   const [cola, setCola] = useState(() => leerColaVisitas(vendedorId));
+  const [verTodos, setVerTodos] = useState(false);
   useEffect(() => {
     setLeyendo(true);
     setErrorLectura(false);
@@ -1601,10 +1825,11 @@ const VisitasVendedorView = ({
     return Array.from(porId.values()).sort((a, b) => safeGetTime(b.fecha) - safeGetTime(a.fecha));
   }, [visitasServidor, cola, hoy]);
   const pendientesOtrosDias = cola.filter(v => v.dia !== hoy).length;
+  const resumenDia = useMemo(() => resumenVisitasDelDia(visitasHoy), [visitasHoy]);
   const visitadosHoy = useMemo(() => new Set(visitasHoy.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId))), [visitasHoy]);
-  const miCartera = useMemo(() => currentUser.rol === 'admin' || currentUser.rol === 'gerente' ? cartera || [] : filtrarCarteraPorVendedor(cartera, currentUser.id), [cartera, currentUser]);
+  const miCartera = useMemo(() => filtrarCarteraPorVendedor(cartera, currentUser.id), [cartera, currentUser]);
   const LIMITE_LISTA = 60;
-  const clientesFiltrados = useMemo(() => miCartera.filter(c => clienteCoincide(c, busqueda)), [miCartera, busqueda]);
+  const busquedaClientes = useMemo(() => buscarClientesParaVisita(miCartera, busqueda, LIMITE_LISTA, verTodos), [miCartera, busqueda, verTodos]);
   const elegir = c => {
     setCliente(c);
     setResultado('');
@@ -1676,6 +1901,7 @@ const VisitasVendedorView = ({
     setResultado('');
     setNota('');
     setBusqueda('');
+    setVerTodos(false);
     if (confirmado) {
       openModal('alert', null, 'Éxito', 'Listo: la visita quedó registrada.', true);
     } else if (guardadaEnTelefono) {
@@ -1687,37 +1913,69 @@ const VisitasVendedorView = ({
   const precisionTexto = u => u && Number.isFinite(u.precision) ? `± ${u.precision} m` : '';
   return React.createElement("div", {
     className: "space-y-6 animate-fadeIn p-4 md:p-8"
-  }, !cliente ? React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
-  }, React.createElement("div", {
-    className: "bg-gradient-to-r from-blue-900 to-blue-800 text-white p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
+  }, !cliente ? React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "bg-gradient-to-r from-blue-900 to-blue-800 text-white rounded-2xl shadow-sm p-5 space-y-4"
   }, React.createElement("div", null, React.createElement("h3", {
     className: "font-black text-xl flex items-center gap-3"
   }, React.createElement(MapPin, {
-    size: 24,
+    size: 22,
     className: "text-orange-400"
-  }), " Marcar visita"), React.createElement("p", {
-    className: "text-sm text-blue-200 mt-1 font-medium"
-  }, "Busca el cliente que estás visitando. La ubicación se toma solo al marcar.")), React.createElement("div", {
-    className: "relative w-full md:w-auto"
+  }), " Mis visitas de hoy"), React.createElement("p", {
+    className: "text-xs text-blue-200 mt-1 font-medium"
+  }, (() => {
+    const f = new Date().toLocaleDateString('es-VE', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long'
+    });
+    return f.charAt(0).toUpperCase() + f.slice(1);
+  })())), React.createElement("div", {
+    className: "grid grid-cols-3 gap-2 text-center"
+  }, React.createElement("div", {
+    className: "bg-white/10 rounded-xl py-3 px-1"
+  }, React.createElement("p", {
+    className: "text-2xl font-black leading-none"
+  }, resumenDia.total), React.createElement("p", {
+    className: "text-[10px] uppercase font-bold text-blue-200 mt-1"
+  }, "Visitas")), React.createElement("div", {
+    className: "bg-white/10 rounded-xl py-3 px-1"
+  }, React.createElement("p", {
+    className: "text-2xl font-black leading-none"
+  }, resumenDia.conPedido), React.createElement("p", {
+    className: "text-[10px] uppercase font-bold text-blue-200 mt-1"
+  }, "Con pedido")), React.createElement("div", {
+    className: "bg-white/10 rounded-xl py-3 px-1"
+  }, React.createElement("p", {
+    className: "text-sm font-black leading-tight pt-1"
+  }, resumenDia.primera ? resumenDia.primera === resumenDia.ultima ? horaCorta(resumenDia.primera) : `${horaCorta(resumenDia.primera)} - ${horaCorta(resumenDia.ultima)}` : '-'), React.createElement("p", {
+    className: "text-[10px] uppercase font-bold text-blue-200 mt-2"
+  }, "Primera y última"))), resumenDia.pendientes > 0 && React.createElement("p", {
+    className: "text-xs font-bold text-yellow-200"
+  }, resumenDia.pendientes, " visita(s) esperando señal para enviarse.")), React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3"
+  }, React.createElement("h3", {
+    className: "font-black text-blue-900 flex items-center gap-2"
+  }, React.createElement(Crosshair, {
+    size: 18,
+    className: "text-orange-500"
+  }), " Nueva visita"), React.createElement("div", {
+    className: "relative"
   }, React.createElement(Search, {
     className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400",
     size: 18
   }), React.createElement("input", {
     type: "text",
-    placeholder: "Buscar por nombre o código...",
+    placeholder: "Buscar cliente por nombre o código...",
     value: busqueda,
     onChange: e => setBusqueda(e.target.value),
-    className: "w-full md:w-64 pl-10 pr-4 py-2.5 bg-white/10 border border-white/20 focus:bg-white focus:text-slate-800 text-white placeholder-white/60 rounded-xl outline-none transition-all font-medium"
-  }))), React.createElement("div", {
-    className: "p-4 md:p-6 bg-slate-50"
-  }, !nuevoAbierto ? React.createElement("button", {
+    className: "w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl outline-none transition-all font-medium text-sm"
+  })), !nuevoAbierto ? React.createElement("button", {
     onClick: () => setNuevoAbierto(true),
-    className: "w-full mb-4 py-3 border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 font-bold rounded-xl transition-colors flex justify-center items-center gap-2"
+    className: "w-full py-3 border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 font-bold rounded-xl transition-colors flex justify-center items-center gap-2 text-sm"
   }, React.createElement(PlusCircle, {
     size: 18
   }), " Cliente nuevo (no está en mi cartera)") : React.createElement("div", {
-    className: "mb-4 bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3"
+    className: "bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3"
   }, React.createElement("p", {
     className: "text-[11px] font-black uppercase tracking-wider text-slate-500"
   }, "Nombre del cliente nuevo"), React.createElement("input", {
@@ -1738,14 +1996,16 @@ const VisitasVendedorView = ({
     onClick: usarClienteNuevo,
     disabled: !nombreNuevoValido,
     className: "flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-xl text-sm font-bold"
-  }, "Continuar"))), React.createElement("div", {
-    className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"
-  }, clientesFiltrados.slice(0, LIMITE_LISTA).map((c, idx) => {
+  }, "Continuar"))), busquedaClientes.esperando ? React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "Escribe al menos ", MIN_LETRAS_BUSQUEDA_VISITA, " letras del nombre o el código del cliente para encontrarlo.") : React.createElement("div", {
+    className: "space-y-2"
+  }, busquedaClientes.lista.map((c, idx) => {
     const yaVisitado = visitadosHoy.has(claveClienteVisita(c.idCliente, c.cliente, vendedorId));
     return React.createElement("button", {
       key: `${c.idCliente || 'sn'}-${idx}`,
       onClick: () => elegir(c),
-      className: "text-left bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-blue-300 transition-all flex items-center gap-3"
+      className: "w-full text-left bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md hover:border-blue-300 transition-all flex items-center gap-3"
     }, React.createElement("div", {
       className: "p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0"
     }, React.createElement(Users, {
@@ -1761,16 +2021,14 @@ const VisitasVendedorView = ({
     }, c.ciudad)), yaVisitado && React.createElement("span", {
       className: "text-[10px] font-black uppercase bg-green-100 text-green-700 px-2 py-1 rounded-full shrink-0"
     }, "Visitado hoy"));
-  })), clientesFiltrados.length > LIMITE_LISTA && React.createElement("p", {
-    className: "text-xs text-slate-500 font-medium text-center mt-4"
-  }, "Se muestran ", LIMITE_LISTA, " de ", clientesFiltrados.length, ". Escribe en el buscador para encontrar al cliente."), clientesFiltrados.length === 0 && React.createElement("div", {
-    className: "flex flex-col items-center justify-center py-14 text-slate-400"
-  }, React.createElement(MapPin, {
-    size: 40,
-    className: "mb-3 opacity-30"
-  }), React.createElement("p", {
-    className: "font-medium"
-  }, miCartera.length === 0 ? 'Todavía no hay clientes cargados en tu ruta.' : 'No se encontraron clientes con esa búsqueda.')))) : React.createElement("div", {
+  }), busquedaClientes.total > LIMITE_LISTA && React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium text-center"
+  }, "Se muestran ", LIMITE_LISTA, " de ", busquedaClientes.total, ". Escribe más del nombre para afinar."), busquedaClientes.total === 0 && React.createElement("p", {
+    className: "text-sm text-slate-400 font-medium text-center py-4"
+  }, miCartera.length === 0 ? 'Todavía no hay clientes cargados en tu ruta.' : 'No se encontraron clientes con esa búsqueda.')), miCartera.length > 0 && React.createElement("button", {
+    onClick: () => setVerTodos(v => !v),
+    className: "text-xs font-bold text-blue-700 hover:underline"
+  }, verTodos ? 'Ocultar la lista de clientes' : `Ver mis clientes (${miCartera.length})`))) : React.createElement("div", {
     className: "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
   }, React.createElement("div", {
     className: "bg-gradient-to-r from-blue-900 to-blue-800 text-white p-6"
@@ -1820,7 +2078,7 @@ const VisitasVendedorView = ({
   }, React.createElement(Clock, {
     className: "text-orange-500",
     size: 20
-  }), " Mis visitas de hoy"), React.createElement("span", {
+  }), " Visitas de hoy"), React.createElement("span", {
     className: "bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold"
   }, visitasHoy.length)), pendientesOtrosDias > 0 && React.createElement("p", {
     className: "px-5 pt-4 text-xs font-bold text-orange-600"
@@ -1861,8 +2119,8 @@ const VisitasVendedorView = ({
 const VisitasMapaPanel = ({
   users,
   currentUser,
-  dia,
-  setDia,
+  periodo,
+  setPeriodo,
   vendedorSel,
   setVendedorSel
 }) => {
@@ -1870,9 +2128,21 @@ const VisitasMapaPanel = ({
   const mapContainerRef = useRef(null);
   const capaRef = useRef(null);
   const encuadreRef = useRef('');
+  const puntosRef = useRef([]);
+  const altoPrevioRef = useRef(0);
   const buscadasRef = useRef(new Map());
-  const hoy = diaLocal();
+  const hoy = useDiaActual();
   const desdeSemana = restarDiasVisita(hoy, 6);
+  const {
+    desde,
+    hasta
+  } = periodo;
+  const clavePeriodo = desde + '|' + hasta;
+  const unDia = desde === hasta;
+  const diasPeriodo = diasEntreVisita(desde, hasta) + 1;
+  const periodoEnSemana = !!desde && !!hasta && desde >= desdeSemana && hasta <= hoy;
+  const verificable = Number.isFinite(diasPeriodo) && diasPeriodo <= MAX_DIAS_VERIFICAR_VISITAS;
+  const etiquetaDia = d => d === hoy ? 'hoy' : String(d || '').split('-').reverse().slice(0, 2).join('/');
   const [semana, setSemana] = useState({
     visitas: [],
     cargando: true,
@@ -1902,50 +2172,71 @@ const VisitasMapaPanel = ({
     });
     return () => unsub();
   }, [desdeSemana]);
-  const diaEnSemana = !!dia && dia >= desdeSemana && dia <= hoy;
   const [aparte, setAparte] = useState({
     visitas: [],
     cargando: false,
-    error: false
+    error: false,
+    hora: null,
+    clave: ''
   });
+  const [recarga, setRecarga] = useState(0);
   useEffect(() => {
-    if (!dia || diaEnSemana) {
+    if (!desde || !hasta || periodoEnSemana) {
       setAparte({
         visitas: [],
         cargando: false,
-        error: false
+        error: false,
+        hora: null,
+        clave: ''
       });
       return;
     }
+    let activo = true;
     setAparte({
       visitas: [],
       cargando: true,
-      error: false
+      error: false,
+      hora: null,
+      clave: clavePeriodo
     });
-    const q = query(collection(db, getCollectionPath('visitas')), where('dia', '==', dia));
-    const unsub = onSnapshot(q, snap => setAparte({
-      visitas: snap.docs.map(d => limpiarVisitaLeida({
-        ...d.data(),
-        id: d.id
-      })),
-      cargando: false,
-      error: false
-    }), err => {
-      console.warn('No se pudieron leer las visitas', err);
-      setAparte({
+    leerVisitasDelPeriodo(desde, hasta).then(visitas => {
+      if (activo) setAparte({
+        visitas,
+        cargando: false,
+        error: false,
+        hora: new Date().toISOString(),
+        clave: clavePeriodo
+      });
+    }).catch(err => {
+      console.warn('No se pudieron leer las visitas del período', err);
+      if (activo) setAparte({
         visitas: [],
         cargando: false,
-        error: true
+        error: true,
+        hora: null,
+        clave: clavePeriodo
       });
     });
-    return () => unsub();
-  }, [dia, diaEnSemana]);
-  const cargando = diaEnSemana ? semana.cargando : aparte.cargando;
-  const errorLectura = diaEnSemana ? semana.error : aparte.error;
-  const visitasDia = useMemo(() => diaEnSemana ? semana.visitas.filter(v => v.dia === dia) : aparte.visitas, [diaEnSemana, semana.visitas, aparte.visitas, dia]);
+    return () => {
+      activo = false;
+    };
+  }, [desde, hasta, periodoEnSemana, recarga]);
+  const lectura = useMemo(() => lecturaDelPeriodo({
+    periodoEnSemana,
+    semana,
+    aparte,
+    clave: clavePeriodo,
+    desde,
+    hasta
+  }), [periodoEnSemana, semana, aparte, clavePeriodo, desde, hasta]);
+  const {
+    cargando,
+    error: errorLectura,
+    visitas: visitasPeriodo
+  } = lectura;
   const esDeMiEquipo = React.useCallback(vendedorId => visitaEsDeMiEquipo(vendedorId, users, currentUser), [users, currentUser]);
-  const visitasEquipo = useMemo(() => visitasDia.filter(v => esDeMiEquipo(v.vendedorId)), [visitasDia, esDeMiEquipo]);
-  const candidatasAlerta = useMemo(() => semana.visitas.concat(diaEnSemana ? [] : aparte.visitas).filter(v => esDeMiEquipo(v.vendedorId)), [semana.visitas, aparte.visitas, diaEnSemana, esDeMiEquipo]);
+  const visitasEquipo = useMemo(() => visitasPeriodo.filter(v => esDeMiEquipo(v.vendedorId)), [visitasPeriodo, esDeMiEquipo]);
+  const candidatasAlerta = useMemo(() => unirVisitasPorId(periodoEnSemana || !verificable || aparte.clave !== clavePeriodo ? [] : aparte.visitas, semana.visitas).filter(v => esDeMiEquipo(v.vendedorId)), [semana.visitas, aparte.visitas, aparte.clave, clavePeriodo, periodoEnSemana, verificable, esDeMiEquipo]);
   const vendedores = useMemo(() => {
     const m = new Map();
     visitasEquipo.forEach(v => {
@@ -1957,50 +2248,55 @@ const VisitasMapaPanel = ({
     })).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
   }, [visitasEquipo]);
   const vendedorEfectivo = vendedores.some(v => v.id === vendedorSel) ? vendedorSel : 'ALL';
-  const visibles = useMemo(() => visitasEquipo.filter(v => vendedorEfectivo === 'ALL' || v.vendedorId === vendedorEfectivo).sort((a, b) => safeGetTime(a.fecha) - safeGetTime(b.fecha)), [visitasEquipo, vendedorEfectivo]);
   const [referencias, setReferencias] = useState({});
+  const [ubicProcesadas, setUbicProcesadas] = useState(null);
   useEffect(() => {
     const ahora = Date.now();
     const faltan = Array.from(new Set(candidatasAlerta.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)).filter(Boolean))).filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
-    if (faltan.length === 0) return;
+    if (faltan.length === 0) {
+      setUbicProcesadas(candidatasAlerta);
+      return;
+    }
     faltan.forEach(c => buscadasRef.current.set(c, ahora));
-    Promise.all(faltan.map(c => {
-      try {
-        return getDoc(doc(db, getCollectionPath('clientesUbicacion'), c)).then(s => s.exists() ? [c, s.data()] : null).catch(() => {
-          buscadasRef.current.delete(c);
-          return null;
-        });
-      } catch (e) {
-        return Promise.resolve(null);
-      }
-    })).then(pares => {
-      const nuevas = {};
-      pares.forEach(p => {
-        if (p) nuevas[p[0]] = p[1];
-      });
-      if (Object.keys(nuevas).length > 0) setReferencias(prev => ({
+    leerUbicacionesDeClientes(faltan).then(({
+      encontradas,
+      fallidas
+    }) => {
+      fallidas.forEach(c => buscadasRef.current.delete(c));
+      if (Object.keys(encontradas).length > 0) setReferencias(prev => ({
         ...prev,
-        ...nuevas
+        ...encontradas
       }));
+      setUbicProcesadas(candidatasAlerta);
     });
   }, [candidatasAlerta]);
-  const evaluar = v => evaluarDistanciaVisita(v, referencias[claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)]);
-  const evaluadas = useMemo(() => visibles.map(v => ({
+  const buscandoUbicaciones = ubicacionesEnBusqueda({
+    verificable,
+    candidatas: candidatasAlerta,
+    procesadas: ubicProcesadas
+  });
+  const evaluarReal = v => evaluarDistanciaVisita(v, referencias[claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)]);
+  const evaluar = v => verificable ? evaluarReal(v) : {
+    estado: 'no-verificada'
+  };
+  const evaluadasEquipo = useMemo(() => visitasEquipo.map(v => ({
     v,
     ev: evaluar(v)
-  })), [visibles, referencias]);
+  })), [visitasEquipo, referencias, verificable]);
+  const evaluadas = useMemo(() => evaluadasEquipo.filter(x => vendedorEfectivo === 'ALL' || x.v.vendedorId === vendedorEfectivo).sort((a, b) => safeGetTime(a.v.fecha) - safeGetTime(b.v.fecha)), [evaluadasEquipo, vendedorEfectivo]);
+  const visibles = useMemo(() => evaluadas.map(x => x.v), [evaluadas]);
   const verificacion = useMemo(() => resumenVerificacion(evaluadas), [evaluadas]);
   const alertas = useMemo(() => candidatasAlerta.map(v => ({
     v,
-    ev: evaluar(v)
+    ev: evaluarReal(v)
   })).filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v)).sort((a, b) => safeGetTime(b.v.fecha) - safeGetTime(a.v.fecha)), [candidatasAlerta, referencias]);
-  const alertasDelDiaPorVendedor = useMemo(() => {
+  const alertasPorVendedor = useMemo(() => {
     const m = {};
-    evaluadas.filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v)).forEach(a => {
+    evaluadasEquipo.filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v)).forEach(a => {
       m[a.v.vendedorId] = (m[a.v.vendedorId] || 0) + 1;
     });
     return m;
-  }, [evaluadas]);
+  }, [evaluadasEquipo]);
   const esAdmin = currentUser.rol === 'admin';
   const validar = async v => {
     try {
@@ -2023,33 +2319,51 @@ const VisitasMapaPanel = ({
       console.warn('No se pudo fijar la ubicación del cliente', err);
     }
   };
-  const resumen = useMemo(() => {
-    const m = new Map();
-    visibles.forEach(v => {
-      if (!m.has(v.vendedorId)) m.set(v.vendedorId, {
-        id: v.vendedorId,
-        nombre: v.vendedorNombre || v.vendedorId,
-        total: 0,
-        conPedido: 0,
-        porResultado: {},
-        primera: null,
-        ultima: null
+  const resumen = useMemo(() => resumenVisitasPorVendedor(visitasEquipo), [visitasEquipo]);
+  const totales = useMemo(() => {
+    const t = {
+      total: 0,
+      conPedido: 0,
+      porResultado: {},
+      alertas: 0
+    };
+    resumen.forEach(r => {
+      t.total += r.total;
+      t.conPedido += r.conPedido;
+      Object.entries(r.porResultado).forEach(([k, n]) => {
+        t.porResultado[k] = (t.porResultado[k] || 0) + n;
       });
-      const r = m.get(v.vendedorId);
-      r.total += 1;
-      if (v.origen === 'pedido') r.conPedido += 1;
-      r.porResultado[v.resultado] = (r.porResultado[v.resultado] || 0) + 1;
-      if (!r.primera || safeGetTime(v.fecha) < safeGetTime(r.primera)) r.primera = v.fecha;
-      if (!r.ultima || safeGetTime(v.fecha) > safeGetTime(r.ultima)) r.ultima = v.fecha;
+      t.alertas += alertasPorVendedor[r.id] || 0;
     });
-    return Array.from(m.values()).sort((a, b) => b.total - a.total);
-  }, [visibles]);
+    return t;
+  }, [resumen, alertasPorVendedor]);
   useEffect(() => {
     if (!window.L || mapRef.current || !mapContainerRef.current) return;
-    mapRef.current = window.L.map(mapContainerRef.current).setView([10.4806, -66.9036], 6);
+    mapRef.current = window.L.map(mapContainerRef.current, {
+      preferCanvas: true
+    }).setView([10.4806, -66.9036], 6);
     agregarFondoMapa(mapRef.current);
     capaRef.current = window.L.layerGroup().addTo(mapRef.current);
+    let observador = null;
+    const avisarTamano = () => {
+      const m = mapRef.current;
+      if (!m || !mapContainerRef.current) return;
+      const alto = mapContainerRef.current.clientHeight;
+      m.invalidateSize();
+      if (altoPrevioRef.current === 0 && alto > 0 && puntosRef.current.length > 0) m.fitBounds(puntosRef.current, {
+        padding: [50, 50],
+        maxZoom: 16
+      });
+      altoPrevioRef.current = alto;
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+      observador = new ResizeObserver(avisarTamano);
+      observador.observe(mapContainerRef.current);
+    }
+    const aviso = setTimeout(avisarTamano, 300);
     return () => {
+      clearTimeout(aviso);
+      if (observador) observador.disconnect();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -2075,20 +2389,23 @@ const VisitasMapaPanel = ({
         fillColor: r.color,
         fillOpacity: 0.9
       });
-      marca.bindPopup(`
+      marca.once('click', () => {
+        marca.bindPopup(`
                         <div class="p-1">
                             <strong class="text-blue-900 block mb-1 text-sm">[${escaparHtml(etiquetaClienteVisita(v))}] ${escaparHtml(v.clienteNombre)}</strong>
                             <span class="text-xs text-slate-500 block">Vendedor: ${escaparHtml(v.vendedorNombre)}</span>
-                            <span class="text-xs text-slate-500 block">Hora: ${escaparHtml(horaCorta(v.fecha))}${Number.isFinite(u.precision) ? ` · GPS ± ${escaparHtml(u.precision)} m` : ''}</span>
+                            <span class="text-xs text-slate-500 block">${unDia ? 'Hora' : 'Día y hora'}: ${unDia ? '' : escaparHtml(etiquetaDia(v.dia)) + ' '}${escaparHtml(horaCorta(v.fecha))}${Number.isFinite(u.precision) ? ` · GPS ± ${escaparHtml(u.precision)} m` : ''}</span>
                             <span class="text-xs font-bold block mt-1" style="color:${r.color}">${escaparHtml(r.label)}${v.origen === 'pedido' ? ' (con pedido)' : ''}</span>
                             ${v.nota ? `<span class="text-xs text-slate-600 block mt-1">${escaparHtml(v.nota)}</span>` : ''}
                             ${ev.estado === 'lejos' ? `<span class="text-xs font-bold block mt-1" style="color:${visitaValidada(v) ? '#16a34a' : '#dc2626'}">${visitaValidada(v) ? 'Alerta validada' : 'Alerta'}: a ${escaparHtml(ev.metros)} m del cliente</span>` : ''}
                             ${v.clienteNuevo ? `<span class="text-[10px] font-bold block mt-1 text-blue-700">Cliente nuevo</span>` : ''}
-                        </div>`);
+                        </div>`).openPopup();
+      });
       marca.addTo(capaRef.current);
       puntos.push([u.lat, u.lng]);
     });
-    const clave = dia + '|' + vendedorEfectivo;
+    puntosRef.current = puntos;
+    const clave = desde + '|' + hasta + '|' + vendedorEfectivo;
     if (puntos.length > 0 && encuadreRef.current !== clave) {
       mapRef.current.fitBounds(puntos, {
         padding: [50, 50],
@@ -2097,23 +2414,49 @@ const VisitasMapaPanel = ({
       encuadreRef.current = clave;
     }
   }, [evaluadas]);
-  const etiquetaDia = d => d === hoy ? 'hoy' : String(d || '').split('-').reverse().slice(0, 2).join('/');
+  const PERIODOS_RAPIDOS = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['7dias', 'Últimos 7 días'], ['mes', 'Este mes']];
+  const periodoActivo = (PERIODOS_RAPIDOS.find(([k]) => {
+    const p = periodoVisitas(k, hoy);
+    return p.desde === desde && p.hasta === hasta;
+  }) || [''])[0];
+  const fechaCorta = d => String(d || '').split('-').reverse().slice(0, 2).join('/');
+  const textoPeriodo = unDia ? desde === hoy ? 'hoy' : `el ${fechaCorta(desde)}` : `del ${fechaCorta(desde)} al ${fechaCorta(hasta)} (${diasPeriodo} días)`;
+  const columnasExtra = unDia ? ['Primera', 'Última'] : ['Días con visitas', 'Prom. por día'];
   return React.createElement("div", {
     className: "space-y-4"
   }, React.createElement("div", {
     className: "bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3"
   }, React.createElement("div", {
+    className: "flex flex-wrap items-center gap-2"
+  }, PERIODOS_RAPIDOS.map(([k, t]) => React.createElement("button", {
+    key: k,
+    onClick: () => setPeriodo(periodoVisitas(k, hoy), k),
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${periodoActivo === k ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`
+  }, t))), React.createElement("div", {
     className: "flex flex-wrap items-center gap-3"
   }, React.createElement("div", {
     className: "flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm"
   }, React.createElement("span", {
     className: "text-[10px] font-bold text-slate-400 uppercase ml-2"
-  }, "Día:"), React.createElement("input", {
+  }, "Desde:"), React.createElement("input", {
     type: "date",
-    value: dia,
-    onChange: e => setDia(e.target.value),
+    value: desde,
+    max: hoy,
+    onChange: e => setPeriodo(ajustarPeriodoVisitas(periodo, 'desde', e.target.value)),
     className: "text-sm font-bold text-blue-900 bg-transparent outline-none cursor-pointer pr-2"
   })), React.createElement("div", {
+    className: "flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm"
+  }, React.createElement("span", {
+    className: "text-[10px] font-bold text-slate-400 uppercase ml-2"
+  }, "Hasta:"), React.createElement("input", {
+    type: "date",
+    value: hasta,
+    max: hoy,
+    onChange: e => setPeriodo(ajustarPeriodoVisitas(periodo, 'hasta', e.target.value)),
+    className: "text-sm font-bold text-blue-900 bg-transparent outline-none cursor-pointer pr-2"
+  })), React.createElement("span", {
+    className: "text-[10px] font-bold text-slate-400"
+  }, "Máximo ", MAX_DIAS_PERIODO_VISITAS, " días por consulta"), React.createElement("div", {
     className: "flex items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-sm"
   }, React.createElement("span", {
     className: "text-[10px] font-bold text-slate-400 uppercase ml-2"
@@ -2128,8 +2471,13 @@ const VisitasMapaPanel = ({
     value: v.id
   }, v.nombre)))), React.createElement("span", {
     className: "text-sm font-bold text-slate-500"
-  }, cargando ? 'Cargando…' : `${visibles.length} visita(s)`), React.createElement("div", {
-    className: "flex flex-wrap gap-3 ml-auto"
+  }, cargando ? 'Cargando…' : `${visibles.length} visita(s) ${textoPeriodo}`), !periodoEnSemana && !cargando && React.createElement("button", {
+    onClick: () => setRecarga(n => n + 1),
+    className: "flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:underline"
+  }, React.createElement(RefreshCw, {
+    size: 14
+  }), " Actualizar", aparte.hora ? ` (leído ${horaCorta(aparte.hora)})` : '')), React.createElement("div", {
+    className: "flex flex-wrap gap-3"
   }, RESULTADOS_VISITA.map(r => React.createElement("span", {
     key: r.id,
     className: "flex items-center gap-1.5 text-[11px] font-bold text-slate-600"
@@ -2138,11 +2486,15 @@ const VisitasMapaPanel = ({
     style: {
       background: r.color
     }
-  }), r.label)))), errorLectura && React.createElement("p", {
+  }), r.label))), errorLectura && React.createElement("p", {
     className: "text-xs font-bold text-red-600"
-  }, "No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto."), visibles.length > 0 && React.createElement("p", {
+  }, "No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto."), visibles.length > 0 && verificable && buscandoUbicaciones && React.createElement("p", {
     className: "text-xs text-slate-500 font-medium"
-  }, "Verificación de las ", visibles.length, " visita(s) con la ubicación del cliente: ", verificacion.cerca, " cerca · ", verificacion.lejos, " lejos · ", verificacion.referencia, " primera visita (fija la ubicación del cliente) · ", verificacion.sinReferencia, " sin ubicación del cliente para comparar · ", verificacion.sinGps, " sin GPS")), alertas.length > 0 && React.createElement("div", {
+  }, "Comparando con la ubicación de los clientes…"), visibles.length > 0 && verificable && !buscandoUbicaciones && React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "Verificación de las ", visibles.length, " visita(s) con la ubicación del cliente: ", verificacion.cerca, " cerca · ", verificacion.lejos, " lejos · ", verificacion.referencia, " primera visita (fija la ubicación del cliente) · ", verificacion.sinReferencia, " sin ubicación del cliente para comparar · ", verificacion.sinGps, " sin GPS."), visibles.length > 0 && !verificable && React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "En períodos de más de ", MAX_DIAS_VERIFICAR_VISITAS, " días solo se cuentan las visitas; la comparación con la ubicación del cliente (cerca o lejos) se ve eligiendo hasta ", MAX_DIAS_VERIFICAR_VISITAS, " días. Las alertas de los últimos 7 días siguen abajo.")), alertas.length > 0 && React.createElement("div", {
     className: "bg-red-50 border-2 border-red-200 rounded-2xl p-4 space-y-3"
   }, React.createElement("h3", {
     className: "font-black text-red-800 flex items-center gap-2"
@@ -2181,7 +2533,9 @@ const VisitasMapaPanel = ({
     className: "w-full h-[420px] md:h-[520px] z-0"
   })), React.createElement("div", {
     className: "bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto"
-  }, React.createElement("table", {
+  }, React.createElement("p", {
+    className: "px-3 pt-3 text-[11px] font-bold text-slate-400"
+  }, "Visitas por vendedor ", textoPeriodo, ". Toca un vendedor para verlo solo en el mapa."), React.createElement("table", {
     className: "w-full text-sm"
   }, React.createElement("thead", {
     className: "bg-slate-50 text-[11px] uppercase text-slate-500"
@@ -2196,17 +2550,27 @@ const VisitasMapaPanel = ({
     className: "text-right p-3 font-black whitespace-nowrap"
   }, "Con pedido"), React.createElement("th", {
     className: "text-right p-3 font-black whitespace-nowrap"
-  }, "Alertas"), React.createElement("th", {
+  }, "Alertas"), columnasExtra.map(c => React.createElement("th", {
+    key: c,
     className: "text-right p-3 font-black whitespace-nowrap"
-  }, "Primera"), React.createElement("th", {
-    className: "text-right p-3 font-black whitespace-nowrap"
-  }, "Última"))), React.createElement("tbody", {
+  }, c)))), React.createElement("tbody", {
     className: "divide-y divide-slate-100"
   }, resumen.length === 0 ? React.createElement("tr", null, React.createElement("td", {
     colSpan: RESULTADOS_VISITA.length + 6,
     className: "p-6 text-center text-slate-400 font-medium"
-  }, cargando ? 'Cargando…' : errorLectura ? 'No se pudieron leer las visitas.' : 'No hay visitas registradas ese día.')) : resumen.map(r => React.createElement("tr", {
-    key: r.id
+  }, cargando ? 'Cargando…' : errorLectura ? 'No se pudieron leer las visitas.' : 'No hay visitas registradas en ese período.')) : resumen.map(r => React.createElement("tr", {
+    key: r.id,
+    onClick: () => setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id),
+    role: "button",
+    tabIndex: 0,
+    "aria-pressed": vendedorEfectivo === r.id,
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id);
+      }
+    },
+    className: `cursor-pointer hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400 ${vendedorEfectivo === r.id ? 'bg-blue-50' : ''}`
   }, React.createElement("td", {
     className: "p-3 font-bold text-slate-800"
   }, r.nombre), React.createElement("td", {
@@ -2218,28 +2582,71 @@ const VisitasMapaPanel = ({
     className: "p-3 text-right text-slate-600"
   }, r.conPedido), React.createElement("td", {
     className: "p-3 text-right"
-  }, alertasDelDiaPorVendedor[r.id] ? React.createElement("span", {
+  }, !verificable ? React.createElement("span", {
+    className: "text-slate-400"
+  }, "-") : buscandoUbicaciones ? React.createElement("span", {
+    className: "text-slate-400"
+  }, "…") : alertasPorVendedor[r.id] ? React.createElement("span", {
     className: "font-black text-red-600"
-  }, alertasDelDiaPorVendedor[r.id]) : React.createElement("span", {
+  }, alertasPorVendedor[r.id]) : React.createElement("span", {
     className: "text-slate-600"
-  }, "0")), React.createElement("td", {
+  }, "0")), unDia ? React.createElement(React.Fragment, null, React.createElement("td", {
     className: "p-3 text-right text-slate-600"
   }, horaCorta(r.primera)), React.createElement("td", {
     className: "p-3 text-right text-slate-600"
-  }, horaCorta(r.ultima))))))));
+  }, horaCorta(r.ultima))) : React.createElement(React.Fragment, null, React.createElement("td", {
+    className: "p-3 text-right text-slate-600"
+  }, r.dias), React.createElement("td", {
+    className: "p-3 text-right text-slate-600"
+  }, r.dias ? (r.total / r.dias).toFixed(1) : '0'))))), resumen.length > 1 && React.createElement("tfoot", {
+    className: "bg-slate-50 border-t-2 border-slate-200"
+  }, React.createElement("tr", null, React.createElement("td", {
+    className: "p-3 font-black text-slate-800"
+  }, "Total"), React.createElement("td", {
+    className: "p-3 text-right font-black text-blue-900"
+  }, totales.total), RESULTADOS_VISITA.map(x => React.createElement("td", {
+    key: x.id,
+    className: "p-3 text-right font-bold text-slate-700"
+  }, totales.porResultado[x.id] || 0)), React.createElement("td", {
+    className: "p-3 text-right font-bold text-slate-700"
+  }, totales.conPedido), React.createElement("td", {
+    className: "p-3 text-right font-bold text-slate-700"
+  }, !verificable ? '-' : buscandoUbicaciones ? '…' : totales.alertas), React.createElement("td", {
+    className: "p-3"
+  }), React.createElement("td", {
+    className: "p-3"
+  }))))));
 };
 const MapaVisitasPantalla = ({
   pedidos,
+  pedidosListos,
+  pedirPedidos,
   users,
   currentUser
 }) => {
   const [vista, setVista] = useState('visitas');
-  const [dia, setDia] = useState(() => diaLocal());
+  const hoy = useDiaActual();
+  const [seleccion, setSeleccion] = useState({
+    clave: 'hoy',
+    desde: '',
+    hasta: ''
+  });
+  const periodo = seleccion.clave ? periodoVisitas(seleccion.clave, hoy) : {
+    desde: seleccion.desde,
+    hasta: seleccion.hasta
+  };
   const [vendedorSel, setVendedorSel] = useState('ALL');
-  const cambiarDia = d => {
-    setDia(d);
+  const cambiarPeriodo = (p, clave) => {
+    setSeleccion({
+      clave: clave || '',
+      desde: p.desde,
+      hasta: p.hasta
+    });
     setVendedorSel('ALL');
   };
+  useEffect(() => {
+    if (vista === 'pedidos' && pedirPedidos) pedirPedidos();
+  }, [vista]);
   return React.createElement("div", {
     className: "space-y-4 p-4 md:p-8"
   }, React.createElement("div", {
@@ -2249,7 +2656,7 @@ const MapaVisitasPantalla = ({
     className: `flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${vista === 'visitas' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
   }, React.createElement(MapPin, {
     size: 18
-  }), " Visitas del día"), React.createElement("button", {
+  }), " Visitas"), React.createElement("button", {
     onClick: () => setVista('pedidos'),
     className: `flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-colors whitespace-nowrap ${vista === 'pedidos' ? 'bg-blue-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`
   }, React.createElement(Receipt, {
@@ -2257,15 +2664,21 @@ const MapaVisitasPantalla = ({
   }), " Pedidos (GPS)")), vista === 'visitas' ? React.createElement(VisitasMapaPanel, {
     users: users,
     currentUser: currentUser,
-    dia: dia,
-    setDia: cambiarDia,
+    periodo: periodo,
+    setPeriodo: cambiarPeriodo,
     vendedorSel: vendedorSel,
     setVendedorSel: setVendedorSel
-  }) : React.createElement(AdminZonasMap, {
+  }) : pedidosListos ? React.createElement(AdminZonasMap, {
     pedidos: pedidos,
     users: users,
     currentUser: currentUser
-  }));
+  }) : React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-slate-100 p-10 flex flex-col items-center gap-3 text-slate-500"
+  }, React.createElement("div", {
+    className: "w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"
+  }), React.createElement("p", {
+    className: "text-sm font-bold"
+  }, "Cargando pedidos…")));
 };
 const AdminZonasMap = ({
   pedidos,
@@ -15573,7 +15986,7 @@ const VentasAdminPanel = ({
     label: '↳ Pestaña: Usuarios'
   }, {
     id: 'gerente-mapa',
-    label: 'Mapa de Visitas'
+    label: 'Monitoreo de Visitas'
   }, {
     id: 'guia',
     label: 'Guía de Uso'
@@ -17647,9 +18060,7 @@ const necesidadesDePantalla = (tab, user) => {
         tasas: 'completo'
       };
     case 'gerente-mapa':
-      return mando ? {
-        pedidos: 'completo'
-      } : {};
+      return {};
     default:
       return {};
   }
@@ -17841,6 +18252,7 @@ function App() {
   const PREFERRED_TABS = ['ventas-global', 'ventas-mes', 'pedidos-vendedor', 'visitas-vendedor', 'pedidos-admin', 'ventas-historico', 'ventas-cartera-activacion', 'incentivos-admin', 'cxc', 'pagos-admin', 'pagos-reportar', 'tasas-admin', 'ventas-ia', 'share-ventas', 'gerente-mapa', 'guia'];
   const hasPermForUser = (id, user) => {
     if (!user) return false;
+    if (id === 'visitas-vendedor' && user.rol !== 'vendedor') return false;
     if (user.rol === 'admin' && (!user.permisos || !Array.isArray(user.permisos) || user.permisos.length === 0)) return true;
     if (user.permisos && Array.isArray(user.permisos) && user.permisos.length > 0) {
       if (id === 'pedidos-admin' && user.permisos.some(p => p.startsWith('tab-'))) return true;
@@ -17868,6 +18280,7 @@ function App() {
     if (id === 'pedidos-aprobar') return rol === 'admin' || rol === 'gerente';
     return false;
   };
+  const pestanaInicial = user => hasPermForUser('visitas-vendedor', user) ? 'visitas-vendedor' : PREFERRED_TABS.find(tabId => hasPermForUser(tabId, user)) || 'ventas-mes';
   const hasPerm = id => {
     return hasPermForUser(id, currentUser);
   };
@@ -17998,6 +18411,9 @@ function App() {
     ...prev,
     [col]: 'completo'
   });
+  const pedirPedidos = () => setNecesidades(prev => unirNecesidades(prev, {
+    pedidos: 'completo'
+  }));
   const recibirColeccion = (col, aplicar, vacioEsFalla) => (snap, clave, err) => {
     const propio = clave.startsWith('propio:');
     if (err) {
@@ -18362,7 +18778,7 @@ function App() {
       } catch (e) {
         console.warn(e);
       }
-      const firstTab = PREFERRED_TABS.find(tabId => hasPermForUser(tabId, userToLogin)) || 'ventas-mes';
+      const firstTab = pestanaInicial(userToLogin);
       setGlobalActiveTab(firstTab);
       setLoginPassword("");
       setSearchUserQuery("");
@@ -18393,7 +18809,7 @@ function App() {
     const savedUser = users.find(u => u.id === savedId);
     if (savedUser) {
       setCurrentUser(savedUser);
-      const firstTab = PREFERRED_TABS.find(tabId => hasPermForUser(tabId, savedUser)) || 'ventas-mes';
+      const firstTab = pestanaInicial(savedUser);
       setGlobalActiveTab(firstTab);
     }
   }, [isDbReady, users, currentUser]);
@@ -18407,7 +18823,7 @@ function App() {
   useEffect(() => {
     if (!currentUser) return;
     if (!hasPerm(globalActiveTab)) {
-      const firstTab = PREFERRED_TABS.find(tabId => hasPermForUser(tabId, currentUser)) || 'ventas-mes';
+      const firstTab = pestanaInicial(currentUser);
       setGlobalActiveTab(firstTab);
     }
   }, [currentUser?.id, currentUser?.rol, currentUser?.permisos, globalActiveTab]);
@@ -18543,7 +18959,10 @@ function App() {
     className: "text-blue-300 text-xs tracking-wider uppercase"
   }, "Ventas & pedidos")), React.createElement("nav", {
     className: "flex-1 px-4 space-y-1 pb-4"
-  }, React.createElement("p", {
+  }, hasPerm('visitas-vendedor') && React.createElement(NavBtn, {
+    id: "visitas-vendedor",
+    icon: MapPin
+  }, "Visitas"), React.createElement("p", {
     className: "text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-2 pb-1"
   }, "Ventas / BI"), hasPerm('ventas-global') && React.createElement(NavBtn, {
     id: "ventas-global",
@@ -18588,10 +19007,7 @@ function App() {
   }, "Pedidos y Finanzas"), hasPerm('pedidos-vendedor') && React.createElement(NavBtn, {
     id: "pedidos-vendedor",
     icon: ShoppingCart
-  }, "Tomar pedidos"), hasPerm('visitas-vendedor') && React.createElement(NavBtn, {
-    id: "visitas-vendedor",
-    icon: MapPin
-  }, "Visitas"), hasPerm('pedidos-admin') && React.createElement(NavBtn, {
+  }, "Tomar pedidos"), hasPerm('pedidos-admin') && React.createElement(NavBtn, {
     id: "pedidos-admin",
     icon: Receipt
   }, "Admin pedidos / catálogo"), hasPerm('cxc') && React.createElement(NavBtn, {
@@ -18609,7 +19025,7 @@ function App() {
   }, "Tasa de Cambio"), hasPerm('gerente-mapa') && React.createElement(NavBtn, {
     id: "gerente-mapa",
     icon: MapIcon
-  }, "Mapa de visitas"), React.createElement("p", {
+  }, "Monitoreo de visitas"), React.createElement("p", {
     className: "text-[10px] font-black text-blue-400 uppercase tracking-widest px-3 pt-4 pb-1"
   }, "Ayuda"), hasPerm('guia') && React.createElement(NavBtn, {
     id: "guia",
@@ -18676,7 +19092,7 @@ function App() {
     size: 20
   })))), React.createElement("div", {
     className: "bg-white border-b border-slate-200 flex md:hidden overflow-x-auto print-hide"
-  }, [...(hasPerm('ventas-global') ? [['ventas-global', 'Corp.']] : []), ...(hasPerm('ventas-mes') ? [['ventas-mes', 'Mes']] : []), ...(hasPerm('ventas-historico') ? [['ventas-historico', 'Hist.']] : []), ...(hasPerm('ventas-ia') ? [['ventas-ia', 'IA']] : []), ...(hasPerm('share-ventas') ? [['share-ventas', 'M.Share']] : []), ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []), ...(hasPerm('incentivos-admin') ? [['incentivos-admin', 'Incent.']] : []), ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []), ...(hasPerm('visitas-vendedor') ? [['visitas-vendedor', 'Visitas']] : []), ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []), ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []), ...(hasPerm('pagos-reportar') ? [['pagos-reportar', 'Rep.Pagos']] : []), ...(hasPerm('pagos-admin') ? [['pagos-admin', 'Pagos']] : []), ...(hasPerm('tasas-admin') ? [['tasas-admin', 'Tasa']] : []), ...(hasPerm('gerente-mapa') ? [['gerente-mapa', 'Mapa']] : []), ...(hasPerm('guia') ? [['guia', 'Guía']] : [])].map(([id, label]) => React.createElement("button", {
+  }, [...(hasPerm('visitas-vendedor') ? [['visitas-vendedor', 'Visitas']] : []), ...(hasPerm('ventas-global') ? [['ventas-global', 'Corp.']] : []), ...(hasPerm('ventas-mes') ? [['ventas-mes', 'Mes']] : []), ...(hasPerm('ventas-historico') ? [['ventas-historico', 'Hist.']] : []), ...(hasPerm('ventas-ia') ? [['ventas-ia', 'IA']] : []), ...(hasPerm('share-ventas') ? [['share-ventas', 'M.Share']] : []), ...(hasPerm('ventas-cartera-activacion') ? [['ventas-cartera-activacion', 'Activa.']] : []), ...(hasPerm('incentivos-admin') ? [['incentivos-admin', 'Incent.']] : []), ...(hasPerm('pedidos-vendedor') ? [['pedidos-vendedor', 'Pedidos']] : []), ...(hasPerm('pedidos-admin') ? [['pedidos-admin', 'Adm.Ped.']] : []), ...(hasPerm('cxc') ? [['cxc', 'CxC']] : []), ...(hasPerm('pagos-reportar') ? [['pagos-reportar', 'Rep.Pagos']] : []), ...(hasPerm('pagos-admin') ? [['pagos-admin', 'Pagos']] : []), ...(hasPerm('tasas-admin') ? [['tasas-admin', 'Tasa']] : []), ...(hasPerm('gerente-mapa') ? [['gerente-mapa', 'Visitas']] : []), ...(hasPerm('guia') ? [['guia', 'Guía']] : [])].map(([id, label]) => React.createElement("button", {
     key: id,
     onClick: () => setGlobalActiveTab(id),
     className: `px-3 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${globalActiveTab === id ? 'border-orange-400 text-orange-200' : 'border-transparent text-blue-200'}`
@@ -18843,6 +19259,8 @@ function App() {
     openModal: openModal
   }), globalActiveTab === 'gerente-mapa' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && React.createElement(MapaVisitasPantalla, {
     pedidos: pedidosData,
+    pedidosListos: necesidades.pedidos === 'completo' && listos.pedidos === 'completo:' + currentUser.id,
+    pedirPedidos: pedirPedidos,
     users: users,
     currentUser: currentUser
   }), globalActiveTab === 'cxc' && (currentUser.rol === 'admin' || currentUser.rol === 'gerente') && React.createElement(GerenteDashboard, {
