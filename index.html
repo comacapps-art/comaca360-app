@@ -137,7 +137,7 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-        import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction, getDocs } from 'firebase/firestore';
+        import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction, getDocs, getDocsFromServer, documentId } from 'firebase/firestore';
         import {
             LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle,
             PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart,
@@ -1801,6 +1801,65 @@
             return dia;
         };
 
+        // Ubicación registrada de varios clientes de una vez. Firestore permite hasta 30 ids por consulta "in": se lee en lotes de
+        // LOTE_UBICACIONES y con pocos lotes a la vez (LOTES_A_LA_VEZ), en vez de un getDoc por cliente (más de mil lecturas
+        // simultáneas congelaban la pantalla del monitoreo). Devuelve las encontradas (por clave de cliente) y las claves de los
+        // lotes que fallaron, para volver a intentarlas.
+        const LOTE_UBICACIONES = 30;
+        const LOTES_A_LA_VEZ = 4;
+        const leerUbicacionesDeClientes = async (claves) => {
+            const encontradas = {};
+            const fallidas = [];
+            const lotes = [];
+            for (let i = 0; i < claves.length; i += LOTE_UBICACIONES) lotes.push(claves.slice(i, i + LOTE_UBICACIONES));
+            let siguiente = 0;
+            const trabajador = async () => {
+                while (siguiente < lotes.length) {
+                    const lote = lotes[siguiente++];
+                    try {
+                        const snap = await getDocs(query(collection(db, getCollectionPath('clientesUbicacion')), where(documentId(), 'in', lote)));
+                        snap.docs.forEach(d => { encontradas[d.id] = d.data(); });
+                    } catch (e) { fallidas.push(...lote); }
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(LOTES_A_LA_VEZ, lotes.length) }, trabajador));
+            return { encontradas, fallidas };
+        };
+
+        // Lectura de las visitas de un período que se sale de la semana, en TRAMOS de DIAS_POR_TRAMO_VISITAS días y con pocos
+        // tramos a la vez, siempre del servidor. Una sola consulta de un mes o de dos (10.000 a 25.000 visitas) es una respuesta
+        // enorme: el emulador la aborta ("too many pending messagings", más de 10.000 documentos en un canal) y con el SDK
+        // normal terminaba mostrando solo lo guardado de la semana como si fuera todo el período. Si un tramo falla, falla
+        // todo (la pantalla avisa del error; nunca se muestra un período a medias como completo).
+        const DIAS_POR_TRAMO_VISITAS = 7;
+        const TRAMOS_A_LA_VEZ_VISITAS = 3;
+        const trocearPeriodoVisitas = (desde, hasta, dias = DIAS_POR_TRAMO_VISITAS) => {
+            const total = diasEntreVisita(desde, hasta);
+            const tramos = [];
+            if (!Number.isFinite(total) || total < 0) return tramos;
+            for (let i = 0; i <= total; i += dias) {
+                tramos.push({ desde: restarDiasVisita(desde, -i), hasta: restarDiasVisita(desde, -Math.min(i + dias - 1, total)) });
+            }
+            return tramos;
+        };
+        const leerVisitasDelPeriodo = async (desde, hasta) => {
+            const tramos = trocearPeriodoVisitas(desde, hasta);
+            const resultados = new Array(tramos.length);
+            let siguiente = 0;
+            let fallo = false;
+            const trabajador = async () => {
+                while (!fallo && siguiente < tramos.length) {
+                    const i = siguiente++;
+                    try {
+                        const snap = await getDocsFromServer(query(collection(db, getCollectionPath('visitas')), where('dia', '>=', tramos[i].desde), where('dia', '<=', tramos[i].hasta)));
+                        resultados[i] = snap.docs.map(d => limpiarVisitaLeida({ ...d.data(), id: d.id }));
+                    } catch (e) { fallo = true; throw e; }
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(TRAMOS_A_LA_VEZ_VISITAS, tramos.length) }, trabajador));
+            return resultados.flat();
+        };
+
         const VisitasVendedorView = ({ currentUser, cartera, openModal }) => {
             const vendedorId = String(currentUser.id);
             const hoy = useDiaActual();
@@ -2092,6 +2151,8 @@
             const mapContainerRef = useRef(null);
             const capaRef = useRef(null);
             const encuadreRef = useRef('');
+            const puntosRef = useRef([]);
+            const altoPrevioRef = useRef(0);
             const buscadasRef = useRef(new Map());
             const hoy = useDiaActual();
             const desdeSemana = restarDiasVisita(hoy, 6);
@@ -2113,16 +2174,18 @@
                 return () => unsub();
             }, [desdeSemana]);
 
-            // Un período que se sale de la semana se lee UNA vez (no en vivo): es más barato y casi no cambia.
+            // Un período que se sale de la semana se lee UNA vez (no en vivo): es más barato y casi no cambia. Se lee
+            // SIEMPRE del servidor y en tramos de 7 días (leerVisitasDelPeriodo): si no hay conexión, o un tramo falla, sale el aviso
+            // de error; con getDocs el SDK podía devolver solo lo que tenía guardado (las visitas de la semana) y mostrarlo como
+            // si fuera todo el período.
             const [aparte, setAparte] = useState({ visitas: [], cargando: false, error: false, hora: null });
             const [recarga, setRecarga] = useState(0);
             useEffect(() => {
                 if (!desde || !hasta || periodoEnSemana) { setAparte({ visitas: [], cargando: false, error: false, hora: null }); return; }
                 let activo = true;
                 setAparte({ visitas: [], cargando: true, error: false, hora: null });
-                const q = query(collection(db, getCollectionPath('visitas')), where('dia', '>=', desde), where('dia', '<=', hasta));
-                getDocs(q)
-                    .then(snap => { if (activo) setAparte({ visitas: snap.docs.map(d => limpiarVisitaLeida({ ...d.data(), id: d.id })), cargando: false, error: false, hora: new Date().toISOString() }); })
+                leerVisitasDelPeriodo(desde, hasta)
+                    .then(visitas => { if (activo) setAparte({ visitas, cargando: false, error: false, hora: new Date().toISOString() }); })
                     .catch(err => { console.warn('No se pudieron leer las visitas del período', err); if (activo) setAparte({ visitas: [], cargando: false, error: true, hora: null }); });
                 return () => { activo = false; };
             }, [desde, hasta, periodoEnSemana, recarga]);
@@ -2146,8 +2209,9 @@
             // Si el vendedor elegido no tiene visitas en el período, se muestra "Todos" (y se filtra como "Todos").
             const vendedorEfectivo = vendedores.some(v => v.id === vendedorSel) ? vendedorSel : 'ALL';
 
-            // Ubicación registrada de cada cliente (un getDoc por cliente que falte). Solo se recuerdan las
-            // encontradas; las que no existen se vuelven a buscar como mucho cada 2 minutos.
+            // Ubicación registrada de cada cliente, leída en LOTES (no un getDoc por cliente: con una semana de visitas
+            // eran más de mil lecturas a la vez y la pantalla se congelaba medio minuto). Solo se recuerdan las
+            // encontradas; las que no existen (o cuyo lote falló) se vuelven a buscar como mucho cada 2 minutos.
             const [referencias, setReferencias] = useState({});
             useEffect(() => {
                 const ahora = Date.now();
@@ -2155,16 +2219,9 @@
                     .filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
                 if (faltan.length === 0) return;
                 faltan.forEach(c => buscadasRef.current.set(c, ahora));
-                Promise.all(faltan.map(c => {
-                    try {
-                        return getDoc(doc(db, getCollectionPath('clientesUbicacion'), c))
-                            .then(s => (s.exists() ? [c, s.data()] : null))
-                            .catch(() => { buscadasRef.current.delete(c); return null; });
-                    } catch (e) { return Promise.resolve(null); }
-                })).then(pares => {
-                    const nuevas = {};
-                    pares.forEach(p => { if (p) nuevas[p[0]] = p[1]; });
-                    if (Object.keys(nuevas).length > 0) setReferencias(prev => ({ ...prev, ...nuevas }));
+                leerUbicacionesDeClientes(faltan).then(({ encontradas, fallidas }) => {
+                    fallidas.forEach(c => buscadasRef.current.delete(c));
+                    if (Object.keys(encontradas).length > 0) setReferencias(prev => ({ ...prev, ...encontradas }));
                 });
             }, [candidatasAlerta]);
 
@@ -2222,7 +2279,21 @@
                 mapRef.current = window.L.map(mapContainerRef.current, { preferCanvas: true }).setView([10.4806, -66.9036], 6);
                 agregarFondoMapa(mapRef.current);
                 capaRef.current = window.L.layerGroup().addTo(mapRef.current);
-                return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+                // El mapa se crea antes de que el estilo del contenedor (su alto) esté aplicado: sin avisarle el tamaño real, un
+                // mapa en canvas queda de alto 0 y no dibuja ningún punto. Se le avisa al cambiar el tamaño y, si estaba en 0,
+                // se vuelve a encuadrar sobre los puntos.
+                let observador = null;
+                const avisarTamano = () => {
+                    const m = mapRef.current;
+                    if (!m || !mapContainerRef.current) return;
+                    const alto = mapContainerRef.current.clientHeight;
+                    m.invalidateSize();
+                    if (altoPrevioRef.current === 0 && alto > 0 && puntosRef.current.length > 0) m.fitBounds(puntosRef.current, { padding: [50, 50], maxZoom: 16 });
+                    altoPrevioRef.current = alto;
+                };
+                if (typeof ResizeObserver !== 'undefined') { observador = new ResizeObserver(avisarTamano); observador.observe(mapContainerRef.current); }
+                const aviso = setTimeout(avisarTamano, 300);
+                return () => { clearTimeout(aviso); if (observador) observador.disconnect(); if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
             }, []);
 
             useEffect(() => {
@@ -2235,7 +2306,8 @@
                     const r = resultadoVisita(v.resultado);
                     const enAlerta = ev.estado === 'lejos' && !visitaValidada(v);
                     const marca = window.L.circleMarker([u.lat, u.lng], { radius: enAlerta ? 11 : 9, color: enAlerta ? '#dc2626' : '#ffffff', weight: enAlerta ? 4 : 2, fillColor: r.color, fillOpacity: 0.9 });
-                    marca.bindPopup(`
+                    // El globo se arma al tocar el punto (no uno por cada visita al dibujar: en períodos largos son miles).
+                    marca.once('click', () => { marca.bindPopup(`
                         <div class="p-1">
                             <strong class="text-blue-900 block mb-1 text-sm">[${escaparHtml(etiquetaClienteVisita(v))}] ${escaparHtml(v.clienteNombre)}</strong>
                             <span class="text-xs text-slate-500 block">Vendedor: ${escaparHtml(v.vendedorNombre)}</span>
@@ -2244,10 +2316,11 @@
                             ${v.nota ? `<span class="text-xs text-slate-600 block mt-1">${escaparHtml(v.nota)}</span>` : ''}
                             ${ev.estado === 'lejos' ? `<span class="text-xs font-bold block mt-1" style="color:${visitaValidada(v) ? '#16a34a' : '#dc2626'}">${visitaValidada(v) ? 'Alerta validada' : 'Alerta'}: a ${escaparHtml(ev.metros)} m del cliente</span>` : ''}
                             ${v.clienteNuevo ? `<span class="text-[10px] font-bold block mt-1 text-blue-700">Cliente nuevo</span>` : ''}
-                        </div>`);
+                        </div>`).openPopup(); });
                     marca.addTo(capaRef.current);
                     puntos.push([u.lat, u.lng]);
                 });
+                puntosRef.current = puntos;
                 // Solo se reencuadra al cambiar el período o el vendedor (no en cada actualización en vivo).
                 const clave = desde + '|' + hasta + '|' + vendedorEfectivo;
                 if (puntos.length > 0 && encuadreRef.current !== clave) {
@@ -2267,7 +2340,7 @@
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                             {PERIODOS_RAPIDOS.map(([k, t]) => (
-                                <button key={k} onClick={() => setPeriodo(periodoVisitas(k, hoy))}
+                                <button key={k} onClick={() => setPeriodo(periodoVisitas(k, hoy), k)}
                                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${periodoActivo === k ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{t}</button>
                             ))}
                         </div>
@@ -2362,7 +2435,9 @@
                                     <tr><td colSpan={RESULTADOS_VISITA.length + 6} className="p-6 text-center text-slate-400 font-medium">{cargando ? 'Cargando…' : (errorLectura ? 'No se pudieron leer las visitas.' : 'No hay visitas registradas en ese período.')}</td></tr>
                                 ) : resumen.map(r => (
                                     <tr key={r.id} onClick={() => setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id)}
-                                        className={`cursor-pointer hover:bg-slate-50 ${vendedorEfectivo === r.id ? 'bg-blue-50' : ''}`}>
+                                        role="button" tabIndex={0} aria-pressed={vendedorEfectivo === r.id}
+                                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id); } }}
+                                        className={`cursor-pointer hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400 ${vendedorEfectivo === r.id ? 'bg-blue-50' : ''}`}>
                                         <td className="p-3 font-bold text-slate-800">{r.nombre}</td>
                                         <td className="p-3 text-right font-black text-blue-900">{r.total}</td>
                                         {RESULTADOS_VISITA.map(x => <td key={x.id} className="p-3 text-right text-slate-600">{r.porResultado[x.id] || 0}</td>)}
@@ -2407,9 +2482,13 @@
         // a la pantalla y eran la causa de que "Mapa" tardara en abrir.
         const MapaVisitasPantalla = ({ pedidos, pedidosListos, pedirPedidos, users, currentUser }) => {
             const [vista, setVista] = useState('visitas');
-            const [periodo, setPeriodo] = useState(() => periodoVisitas('hoy', diaLocal()));
+            const hoy = useDiaActual();
+            // Un período rápido (hoy, ayer, 7 días, mes) se guarda por su nombre y se recalcula con el día actual: si la
+            // pantalla queda abierta pasada la medianoche, "Hoy" pasa solo al día nuevo. Las fechas a mano se quedan como están.
+            const [seleccion, setSeleccion] = useState({ clave: 'hoy', desde: '', hasta: '' });
+            const periodo = seleccion.clave ? periodoVisitas(seleccion.clave, hoy) : { desde: seleccion.desde, hasta: seleccion.hasta };
             const [vendedorSel, setVendedorSel] = useState('ALL');
-            const cambiarPeriodo = (p) => { setPeriodo(p); setVendedorSel('ALL'); };
+            const cambiarPeriodo = (p, clave) => { setSeleccion({ clave: clave || '', desde: p.desde, hasta: p.hasta }); setVendedorSel('ALL'); };
             useEffect(() => { if (vista === 'pedidos' && pedirPedidos) pedirPedidos(); }, [vista]);
             return (
                 <div className="space-y-4 p-4 md:p-8">

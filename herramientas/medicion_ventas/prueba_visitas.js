@@ -36,7 +36,8 @@ const FUNCIONES = ['diaLocal', 'horaCorta', 'escaparHtml', 'RESULTADOS_VISITA', 
   'asegurarUbicacionCliente', 'visitasEnVuelo', 'enviarVisita', 'nuevaIdVisita', 'registrarVisita', 'reintentarColaVisitas',
   'reintentarTodasLasColasVisitas', 'visitaDePedido', 'safeGetTime', 'clienteCoincide', 'MAX_DIAS_PERIODO_VISITAS', 'MAX_DIAS_VERIFICAR_VISITAS',
   'MIN_LETRAS_BUSQUEDA_VISITA', 'diasEntreVisita', 'periodoVisitas', 'ajustarPeriodoVisitas', 'visitasDelPeriodo', 'unirVisitasPorId',
-  'resumenVisitasPorVendedor', 'resumenVisitasDelDia', 'buscarClientesParaVisita'];
+  'resumenVisitasPorVendedor', 'resumenVisitasDelDia', 'buscarClientesParaVisita', 'LOTE_UBICACIONES', 'LOTES_A_LA_VEZ', 'leerUbicacionesDeClientes',
+  'DIAS_POR_TRAMO_VISITAS', 'TRAMOS_A_LA_VEZ_VISITAS', 'trocearPeriodoVisitas', 'leerVisitasDelPeriodo'];
 execFileSync(process.execPath, [path.join(__dirname, 'extraer.js'), '--extra', FUNCIONES.join(','), '--salida', SALIDA], { stdio: 'inherit' });
 const TEXTO = fs.readFileSync(SALIDA, 'utf8').replace(/\r\n/g, '\n');
 
@@ -628,6 +629,113 @@ const bateria = async (codigo, mostrar) => {
     assert.strictEqual(M.buscarClientesParaVisita(cartera, 'nadie así', 60, false).total, 0);
   });
 
+  // Firestore falso para las consultas de lotes y tramos: cuenta cuántas hay en vuelo a la vez, exige como mucho 30 ids por
+  // "in", hace como el emulador (falla con más de 10.000 documentos en una respuesta) y trata getDocs como la caché del SDK
+  // (sin visitas del servidor): solo getDocsFromServer trae las visitas.
+  const instalarLecturas = ({ visitas = [], ubicaciones = {}, fallaLote = () => false, fallaTramo = () => false }) => {
+    const est = { enCurso: 0, maxEnCurso: 0, consultas: [] };
+    const atender = async (q, desdeServidor) => {
+      est.enCurso++; est.maxEnCurso = Math.max(est.maxEnCurso, est.enCurso); est.consultas.push(q);
+      try {
+        await esperar(3);
+        const f = q.filtros;
+        if (f[0].campo === '__name__') {
+          if (f[0].valor.length > 30) throw new Error('"in" admite hasta 30 valores');
+          if (fallaLote(f[0].valor)) throw new Error('el lote falló');
+          return { docs: f[0].valor.filter(id => ubicaciones[id]).map(id => ({ id, data: () => ubicaciones[id] })) };
+        }
+        if (!desdeServidor) return { docs: [] };
+        const d = f.find(x => x.op === '>=').valor;
+        const h = f.find(x => x.op === '<=').valor;
+        if (fallaTramo(d, h)) throw new Error('el tramo falló');
+        const docs = visitas.filter(v => v.dia >= d && v.dia <= h);
+        if (docs.length > 10000) throw new Error('too many pending messagings in the back channel');
+        return { docs: docs.map(v => ({ id: v.id, data: () => v })) };
+      } finally { est.enCurso--; }
+    };
+    globalThis.where = (campo, op, valor) => ({ campo, op, valor });
+    globalThis.documentId = () => '__name__';
+    globalThis.query = (col, ...filtros) => ({ col, filtros });
+    globalThis.getDocs = (q) => atender(q, false);
+    globalThis.getDocsFromServer = (q) => atender(q, true);
+    return est;
+  };
+
+  await prueba('ubicaciones de clientes en lotes de 30 ids y pocos a la vez; un lote que falla se devuelve para reintentar', async () => {
+    const { M } = nuevo();
+    const claves = Array.from({ length: 95 }, (_, i) => 'c' + i);
+    const ubicaciones = {};
+    claves.filter((_, i) => i % 2 === 0).forEach(c => { ubicaciones[c] = { lat: 10, lng: -66, clave: c }; });
+    const est = instalarLecturas({ ubicaciones });
+    const r = await M.leerUbicacionesDeClientes(claves);
+    assert.strictEqual(est.consultas.length, 4, '95 claves = 4 consultas (30, 30, 30, 5)');
+    assert.deepStrictEqual(est.consultas.map(q => q.filtros[0].valor.length), [30, 30, 30, 5]);
+    assert.ok(est.maxEnCurso >= 2, 'los lotes sí van en paralelo: ' + est.maxEnCurso);
+    // con muchos lotes, nunca más de 4 a la vez (número fijo: no depende de la constante del código)
+    const muchas = Array.from({ length: 400 }, (_, i) => 'm' + i);
+    const estMuchas = instalarLecturas({ ubicaciones });
+    await M.leerUbicacionesDeClientes(muchas);
+    assert.strictEqual(estMuchas.consultas.length, 14);
+    assert.ok(estMuchas.maxEnCurso <= 4 && estMuchas.maxEnCurso >= 2, 'como mucho 4 lotes a la vez: ' + estMuchas.maxEnCurso);
+    assert.strictEqual(Object.keys(r.encontradas).length, 48);
+    assert.strictEqual(r.encontradas.c0.clave, 'c0');
+    assert.deepStrictEqual(r.fallidas, []);
+    // un lote falla (el segundo): sus claves vuelven en "fallidas" y el resto sigue llegando
+    const est2 = instalarLecturas({ ubicaciones, fallaLote: (lote) => lote.includes('c30') });
+    const r2 = await M.leerUbicacionesDeClientes(claves);
+    assert.strictEqual(r2.fallidas.length, 30);
+    assert.ok(r2.fallidas.includes('c30') && r2.fallidas.includes('c59'));
+    assert.ok(r2.encontradas.c0 && r2.encontradas.c60 && !r2.encontradas.c30);
+    // nada que leer: ninguna consulta
+    const est3 = instalarLecturas({ ubicaciones });
+    assert.deepStrictEqual(await M.leerUbicacionesDeClientes([]), { encontradas: {}, fallidas: [] });
+    assert.strictEqual(est3.consultas.length, 0);
+  });
+
+  await prueba('período largo: se parte en tramos de 7 días, sin huecos ni solapes (incluye 62 días)', async () => {
+    const { M } = nuevo();
+    const cubre = (desde, hasta) => {
+      const tr = M.trocearPeriodoVisitas(desde, hasta);
+      const dias = [];
+      tr.forEach(x => { for (let d = x.desde; d <= x.hasta; d = M.restarDiasVisita(d, -1)) dias.push(d); });
+      const esperado = [];
+      for (let d = desde; d <= hasta; d = M.restarDiasVisita(d, -1)) esperado.push(d);
+      assert.deepStrictEqual(dias, esperado, 'sin huecos ni solapes ' + desde + '..' + hasta);
+      assert.ok(tr.every(x => M.diasEntreVisita(x.desde, x.hasta) + 1 <= M.DIAS_POR_TRAMO_VISITAS));
+      return tr;
+    };
+    assert.deepStrictEqual(cubre('2026-11-01', '2026-11-26').map(x => x.desde + '/' + x.hasta), ['2026-11-01/2026-11-07', '2026-11-08/2026-11-14', '2026-11-15/2026-11-21', '2026-11-22/2026-11-26']);
+    assert.strictEqual(cubre('2026-11-26', '2026-11-26').length, 1);
+    assert.strictEqual(cubre('2026-11-20', '2026-11-26').length, 1);
+    assert.strictEqual(cubre('2026-11-20', '2026-11-27').length, 2);
+    assert.strictEqual(cubre('2026-09-26', '2026-11-26').length, 9, '62 días = 9 tramos');
+    assert.strictEqual(cubre('2026-12-20', '2027-01-10').length, 4, 'cruza el fin de año');
+    assert.deepStrictEqual(M.trocearPeriodoVisitas('2026-11-26', '2026-11-20'), []);
+    assert.deepStrictEqual(M.trocearPeriodoVisitas('', '2026-11-20'), []);
+  });
+
+  await prueba('visitas de un período largo: se leen del servidor por tramos (una consulta de 16.000 falla en el emulador), todas y sin repetir', async () => {
+    const { M } = nuevo();
+    const visitas = [];
+    for (let i = 0; i < 40; i++) {
+      const dia = M.restarDiasVisita('2026-11-26', 39 - i);
+      for (let k = 0; k < 400; k++) visitas.push({ id: dia + '-' + k, dia, vendedorId: '1', vendedorNombre: 'Uno', resultado: 'vendio', fecha: dia + 'T15:00:00.000Z' });
+    }
+    const est = instalarLecturas({ visitas });
+    const r = await M.leerVisitasDelPeriodo('2026-10-18', '2026-11-26');
+    assert.strictEqual(r.length, 16000, 'todas las visitas del período');
+    assert.strictEqual(new Set(r.map(v => v.id)).size, 16000, 'sin repetidas');
+    assert.ok(est.maxEnCurso <= 3 && est.maxEnCurso >= 2, 'como mucho 3 tramos a la vez (número fijo): ' + est.maxEnCurso);
+    assert.ok(est.consultas.length >= 6, 'varios tramos: ' + est.consultas.length);
+    assert.ok(r.every(v => typeof v.vendedorNombre === 'string' && v.resultado === 'vendio'), 'las visitas llegan saneadas');
+    // un tramo falla: falla todo (nunca un período a medias dado por completo)
+    instalarLecturas({ visitas, fallaTramo: (d) => d === '2026-11-01' });
+    await assert.rejects(M.leerVisitasDelPeriodo('2026-10-18', '2026-11-26'), /el tramo falló/);
+    // sin visitas en el período: lista vacía
+    instalarLecturas({ visitas });
+    assert.deepStrictEqual(await M.leerVisitasDelPeriodo('2025-01-01', '2025-01-05'), []);
+  });
+
   await prueba('textos del mapa escapados y resultados conocidos', async () => {
     const { M } = nuevo();
     assert.strictEqual(M.escaparHtml(`<b onclick="x">'&`), '&lt;b onclick=&quot;x&quot;&gt;&#39;&amp;');
@@ -654,8 +762,10 @@ const estatico = () => {
     html.includes("if (id === 'visitas-vendedor') return rol === 'vendedor';") && html.includes("case 'visitas-vendedor': return { cartera: propio };"));
   chequear('el monitoreo escucha la semana en vivo (alertas) y lee UNA vez un período que se sale de ella',
     /query\(collection\(db, getCollectionPath\('visitas'\)\), where\('dia', '>=', desdeSemana\)\)/.test(html) &&
-    /query\(collection\(db, getCollectionPath\('visitas'\)\), where\('dia', '>=', desde\), where\('dia', '<=', hasta\)\);\n\s+getDocs\(q\)/.test(html) &&
-    /runTransaction, getDocs \} from 'firebase\/firestore'/.test(html));
+    /leerVisitasDelPeriodo\(desde, hasta\)\n\s+\.then\(visitas => \{ if \(activo\) setAparte\(\{ visitas, cargando: false, error: false/.test(html) &&
+    html.includes("await getDocsFromServer(query(collection(db, getCollectionPath('visitas')), where('dia', '>=', tramos[i].desde), where('dia', '<=', tramos[i].hasta)))") &&
+    !/getDocs\(q\)/.test(html) &&
+    /runTransaction, getDocs, getDocsFromServer, documentId \} from 'firebase\/firestore'/.test(html));
   chequear('el vendedor lee solo sus visitas de hoy', /where\('vendedorId', '==', vendedorId\), where\('dia', '==', hoy\)/.test(html));
   chequear('se reintenta la cola de todos al abrir, al volver la señal y cada 2 minutos', /reintentarTodasLasColasVisitas\(\)[\s\S]{0,200}addEventListener\('online', reintentar\)[\s\S]{0,120}setInterval\(reintentar, 120000\)/.test(html));
   const iMarcar = html.indexOf('const marcar = async () => {');
@@ -665,7 +775,9 @@ const estatico = () => {
   chequear('cliente nuevo: botón, formulario, cruce con la cartera sin tildes y marca en la visita',
     html.includes('Cliente nuevo (no está en mi cartera)') && html.includes('clienteNuevo: !!cliente.nuevo,') && html.includes('textoParaClave(c.cliente) === textoParaClave(nombreNuevo)'));
   chequear('solo el administrador valida alertas y corrige la ubicación', html.includes("const esAdmin = currentUser.rol === 'admin';") && /\{esAdmin && \(\s+<div className="flex gap-2 shrink-0">\s+<button onClick=\{\(\) => validar\(v\)\}[\s\S]{0,400}ubicarClienteAqui\(v\)/.test(html));
-  chequear('el mapa lee la ubicación de cada cliente con getDoc y marca la alerta', /getDoc\(doc\(db, getCollectionPath\('clientesUbicacion'\), c\)\)/.test(html) && html.includes("filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v))"));
+  chequear('el mapa lee la ubicación de los clientes EN LOTES (no un getDoc por cliente) y marca la alerta',
+    html.includes('leerUbicacionesDeClientes(faltan).then(({ encontradas, fallidas }) => {') && html.includes("where(documentId(), 'in', lote)") &&
+    !/getDoc\(doc\(db, getCollectionPath\('clientesUbicacion'\), c\)\)/.test(html) && html.includes("filter(x => x.ev.estado === 'lejos' && !visitaValidada(x.v))"));
   chequear('la ubicación del cliente se fija en una transacción (sin pisar) y solo con visitas manuales', /runTransaction\(db, async \(tx\) => \{\n\s+const existente = await tx\.get\(ref\);\n\s+if \(existente\.exists\(\)\) return false;/.test(html) && html.includes("if (visita.origen === 'pedido') return false;"));
   chequear('el globo del mapa de pedidos escapa los textos', html.includes("[${escaparHtml(p.clienteId || 'S/N')}] ${escaparHtml(p.clienteNombre)}") && html.includes('Vendedor: ${escaparHtml(p.vendedorNombre)}'));
 
@@ -703,6 +815,15 @@ const estatico = () => {
     html.includes('<input type="date" value={desde} max={hoy}') && html.includes('<input type="date" value={hasta} max={hoy}') && html.includes('Máximo {MAX_DIAS_PERIODO_VISITAS} días por consulta'));
   chequear('nombres: "Monitoreo de visitas" en el menú y "Visitas" en la barra del teléfono',
     html.includes('icon={MapIcon}>Monitoreo de visitas</NavBtn>') && html.includes("[['gerente-mapa', 'Visitas']]") && html.includes("{ id: 'gerente-mapa', label: 'Monitoreo de Visitas' }"));
+
+  chequear('el mapa se entera de su tamaño real (alto 0 al crearse: en canvas no dibujaba nada) y el globo se arma al tocar',
+    html.includes('observador = new ResizeObserver(avisarTamano); observador.observe(mapContainerRef.current);') && html.includes('m.invalidateSize();') &&
+    html.includes("marca.once('click', () => { marca.bindPopup(") && html.includes('</div>' + String.fromCharCode(96) + ').openPopup(); });'));
+  chequear('los períodos rápidos (hoy, ayer, 7 días, mes) siguen a "hoy" si cambia el día',
+    html.includes("const periodo = seleccion.clave ? periodoVisitas(seleccion.clave, hoy) : { desde: seleccion.desde, hasta: seleccion.hasta };") &&
+    html.includes('onClick={() => setPeriodo(periodoVisitas(k, hoy), k)}') && html.includes("setSeleccion({ clave: clave || '', desde: p.desde, hasta: p.hasta })"));
+  chequear('las filas de la tabla del monitoreo también se usan con el teclado',
+    html.includes('role="button" tabIndex={0} aria-pressed={vendedorEfectivo === r.id}') && html.includes("if (e.key === 'Enter' || e.key === ' ')"));
   const crudas = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']');
   chequear('no quedan marcas de tilde "crudas" en el código (se escriben con String.fromCharCode)', !crudas.test(html));
   chequear('no quedan mapas de CARTO (ahora pide clave)', !html.includes('basemaps.cartocdn.com') && (html.match(/agregarFondoMapa\(mapRef\.current\)/g) || []).length === 2);
@@ -774,6 +895,15 @@ const estatico = () => {
     ['resumen del día: primera es la última', cambiar('if (primera === null || t < safeGetTime(primera)) primera = v.fecha;', 'primera = v.fecha;')],
     ['el buscador muestra toda la cartera sin escribir', cambiar('if (!verTodos && q.length < MIN_LETRAS_BUSQUEDA_VISITA)', 'if (false)')],
     ['el buscador sin tope', cambiar('lista: todos.slice(0, limite)', 'lista: todos')],
+    ['lotes de 31 ids (Firestore admite 30)', cambiar('const LOTE_UBICACIONES = 30;', 'const LOTE_UBICACIONES = 31;')],
+    ['todos los lotes de ubicaciones a la vez', cambiar('const LOTES_A_LA_VEZ = 4;', 'const LOTES_A_LA_VEZ = 100;')],
+    ['un lote de ubicaciones fallido se da por leído', cambiar('} catch (e) { fallidas.push(...lote); }', '} catch (e) { }')],
+    ['tramos de 30 días', cambiar('const DIAS_POR_TRAMO_VISITAS = 7;', 'const DIAS_POR_TRAMO_VISITAS = 30;')],
+    ['tramos que se solapan un día', cambiar('Math.min(i + dias - 1, total)', 'Math.min(i + dias, total)')],
+    ['todos los tramos de visitas a la vez', cambiar('const TRAMOS_A_LA_VEZ_VISITAS = 3;', 'const TRAMOS_A_LA_VEZ_VISITAS = 50;')],
+    ['un tramo de visitas fallido se ignora', cambiar('} catch (e) { fallo = true; throw e; }', '} catch (e) { resultados[i] = []; }')],
+    ['las visitas del período salen de la caché', cambiar('await getDocsFromServer(', 'await getDocs(')],
+    ['el último tramo se pierde', cambiar('for (let i = 0; i <= total; i += dias) {', 'for (let i = 0; i < total; i += dias) {')],
     ['GPS sin código de error de permiso', cambiar('err => fin(reject, err),', 'err => fin(reject, new Error("x")),')]
   ];
   let detectados = 0;

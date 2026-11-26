@@ -134,7 +134,7 @@ import React, { useState, useMemo, useRef, useEffect, useTransition, useDeferred
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc, writeBatch, addDoc, updateDoc, serverTimestamp, query, orderBy, where, deleteField, waitForPendingWrites, runTransaction, getDocs, getDocsFromServer, documentId } from 'firebase/firestore';
 import { LayoutDashboard, Users, Upload, Package, Box, LogOut, CheckCircle2, AlertCircle, PlusCircle, Trash2, Save, UserPlus, Edit2, X, Filter, Tag, Receipt, ShoppingCart, Search, Lock, BookOpen, Download, CalendarDays, Plus, Minus, FileText, MapPin, DollarSign, Printer, Map as MapIcon, Crosshair, ChevronRight, Wallet, Link as LinkIcon, Clock, Target, TrendingUp, ChevronDown, ChevronUp, FileSpreadsheet, Settings, TableProperties, PieChart, BarChart3, Calculator, History, TrendingDown, Sparkles, BrainCircuit, Key, Github, HelpCircle, List, RefreshCw, Weight, ArrowRightLeft, Award, Paperclip } from 'lucide-react';
 const isCanvasEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : {
@@ -1672,6 +1672,74 @@ const useDiaActual = () => {
   }, []);
   return dia;
 };
+const LOTE_UBICACIONES = 30;
+const LOTES_A_LA_VEZ = 4;
+const leerUbicacionesDeClientes = async claves => {
+  const encontradas = {};
+  const fallidas = [];
+  const lotes = [];
+  for (let i = 0; i < claves.length; i += LOTE_UBICACIONES) lotes.push(claves.slice(i, i + LOTE_UBICACIONES));
+  let siguiente = 0;
+  const trabajador = async () => {
+    while (siguiente < lotes.length) {
+      const lote = lotes[siguiente++];
+      try {
+        const snap = await getDocs(query(collection(db, getCollectionPath('clientesUbicacion')), where(documentId(), 'in', lote)));
+        snap.docs.forEach(d => {
+          encontradas[d.id] = d.data();
+        });
+      } catch (e) {
+        fallidas.push(...lote);
+      }
+    }
+  };
+  await Promise.all(Array.from({
+    length: Math.min(LOTES_A_LA_VEZ, lotes.length)
+  }, trabajador));
+  return {
+    encontradas,
+    fallidas
+  };
+};
+const DIAS_POR_TRAMO_VISITAS = 7;
+const TRAMOS_A_LA_VEZ_VISITAS = 3;
+const trocearPeriodoVisitas = (desde, hasta, dias = DIAS_POR_TRAMO_VISITAS) => {
+  const total = diasEntreVisita(desde, hasta);
+  const tramos = [];
+  if (!Number.isFinite(total) || total < 0) return tramos;
+  for (let i = 0; i <= total; i += dias) {
+    tramos.push({
+      desde: restarDiasVisita(desde, -i),
+      hasta: restarDiasVisita(desde, -Math.min(i + dias - 1, total))
+    });
+  }
+  return tramos;
+};
+const leerVisitasDelPeriodo = async (desde, hasta) => {
+  const tramos = trocearPeriodoVisitas(desde, hasta);
+  const resultados = new Array(tramos.length);
+  let siguiente = 0;
+  let fallo = false;
+  const trabajador = async () => {
+    while (!fallo && siguiente < tramos.length) {
+      const i = siguiente++;
+      try {
+        const snap = await getDocsFromServer(query(collection(db, getCollectionPath('visitas')), where('dia', '>=', tramos[i].desde), where('dia', '<=', tramos[i].hasta)));
+        resultados[i] = snap.docs.map(d => limpiarVisitaLeida({
+          ...d.data(),
+          id: d.id
+        }));
+      } catch (e) {
+        fallo = true;
+        throw e;
+      }
+    }
+  };
+  await Promise.all(Array.from({
+    length: Math.min(TRAMOS_A_LA_VEZ_VISITAS, tramos.length)
+  }, trabajador));
+  return resultados.flat();
+};
 const VisitasVendedorView = ({
   currentUser,
   cartera,
@@ -2035,6 +2103,8 @@ const VisitasMapaPanel = ({
   const mapContainerRef = useRef(null);
   const capaRef = useRef(null);
   const encuadreRef = useRef('');
+  const puntosRef = useRef([]);
+  const altoPrevioRef = useRef(0);
   const buscadasRef = useRef(new Map());
   const hoy = useDiaActual();
   const desdeSemana = restarDiasVisita(hoy, 6);
@@ -2100,13 +2170,9 @@ const VisitasMapaPanel = ({
       error: false,
       hora: null
     });
-    const q = query(collection(db, getCollectionPath('visitas')), where('dia', '>=', desde), where('dia', '<=', hasta));
-    getDocs(q).then(snap => {
+    leerVisitasDelPeriodo(desde, hasta).then(visitas => {
       if (activo) setAparte({
-        visitas: snap.docs.map(d => limpiarVisitaLeida({
-          ...d.data(),
-          id: d.id
-        })),
+        visitas,
         cargando: false,
         error: false,
         hora: new Date().toISOString()
@@ -2147,23 +2213,14 @@ const VisitasMapaPanel = ({
     const faltan = Array.from(new Set(candidatasAlerta.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)).filter(Boolean))).filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
     if (faltan.length === 0) return;
     faltan.forEach(c => buscadasRef.current.set(c, ahora));
-    Promise.all(faltan.map(c => {
-      try {
-        return getDoc(doc(db, getCollectionPath('clientesUbicacion'), c)).then(s => s.exists() ? [c, s.data()] : null).catch(() => {
-          buscadasRef.current.delete(c);
-          return null;
-        });
-      } catch (e) {
-        return Promise.resolve(null);
-      }
-    })).then(pares => {
-      const nuevas = {};
-      pares.forEach(p => {
-        if (p) nuevas[p[0]] = p[1];
-      });
-      if (Object.keys(nuevas).length > 0) setReferencias(prev => ({
+    leerUbicacionesDeClientes(faltan).then(({
+      encontradas,
+      fallidas
+    }) => {
+      fallidas.forEach(c => buscadasRef.current.delete(c));
+      if (Object.keys(encontradas).length > 0) setReferencias(prev => ({
         ...prev,
-        ...nuevas
+        ...encontradas
       }));
     });
   }, [candidatasAlerta]);
@@ -2236,7 +2293,26 @@ const VisitasMapaPanel = ({
     }).setView([10.4806, -66.9036], 6);
     agregarFondoMapa(mapRef.current);
     capaRef.current = window.L.layerGroup().addTo(mapRef.current);
+    let observador = null;
+    const avisarTamano = () => {
+      const m = mapRef.current;
+      if (!m || !mapContainerRef.current) return;
+      const alto = mapContainerRef.current.clientHeight;
+      m.invalidateSize();
+      if (altoPrevioRef.current === 0 && alto > 0 && puntosRef.current.length > 0) m.fitBounds(puntosRef.current, {
+        padding: [50, 50],
+        maxZoom: 16
+      });
+      altoPrevioRef.current = alto;
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+      observador = new ResizeObserver(avisarTamano);
+      observador.observe(mapContainerRef.current);
+    }
+    const aviso = setTimeout(avisarTamano, 300);
     return () => {
+      clearTimeout(aviso);
+      if (observador) observador.disconnect();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -2262,7 +2338,8 @@ const VisitasMapaPanel = ({
         fillColor: r.color,
         fillOpacity: 0.9
       });
-      marca.bindPopup(`
+      marca.once('click', () => {
+        marca.bindPopup(`
                         <div class="p-1">
                             <strong class="text-blue-900 block mb-1 text-sm">[${escaparHtml(etiquetaClienteVisita(v))}] ${escaparHtml(v.clienteNombre)}</strong>
                             <span class="text-xs text-slate-500 block">Vendedor: ${escaparHtml(v.vendedorNombre)}</span>
@@ -2271,10 +2348,12 @@ const VisitasMapaPanel = ({
                             ${v.nota ? `<span class="text-xs text-slate-600 block mt-1">${escaparHtml(v.nota)}</span>` : ''}
                             ${ev.estado === 'lejos' ? `<span class="text-xs font-bold block mt-1" style="color:${visitaValidada(v) ? '#16a34a' : '#dc2626'}">${visitaValidada(v) ? 'Alerta validada' : 'Alerta'}: a ${escaparHtml(ev.metros)} m del cliente</span>` : ''}
                             ${v.clienteNuevo ? `<span class="text-[10px] font-bold block mt-1 text-blue-700">Cliente nuevo</span>` : ''}
-                        </div>`);
+                        </div>`).openPopup();
+      });
       marca.addTo(capaRef.current);
       puntos.push([u.lat, u.lng]);
     });
+    puntosRef.current = puntos;
     const clave = desde + '|' + hasta + '|' + vendedorEfectivo;
     if (puntos.length > 0 && encuadreRef.current !== clave) {
       mapRef.current.fitBounds(puntos, {
@@ -2300,7 +2379,7 @@ const VisitasMapaPanel = ({
     className: "flex flex-wrap items-center gap-2"
   }, PERIODOS_RAPIDOS.map(([k, t]) => React.createElement("button", {
     key: k,
-    onClick: () => setPeriodo(periodoVisitas(k, hoy)),
+    onClick: () => setPeriodo(periodoVisitas(k, hoy), k),
     className: `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${periodoActivo === k ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`
   }, t))), React.createElement("div", {
     className: "flex flex-wrap items-center gap-3"
@@ -2429,7 +2508,16 @@ const VisitasMapaPanel = ({
   }, cargando ? 'Cargando…' : errorLectura ? 'No se pudieron leer las visitas.' : 'No hay visitas registradas en ese período.')) : resumen.map(r => React.createElement("tr", {
     key: r.id,
     onClick: () => setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id),
-    className: `cursor-pointer hover:bg-slate-50 ${vendedorEfectivo === r.id ? 'bg-blue-50' : ''}`
+    role: "button",
+    tabIndex: 0,
+    "aria-pressed": vendedorEfectivo === r.id,
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setVendedorSel(vendedorEfectivo === r.id ? 'ALL' : r.id);
+      }
+    },
+    className: `cursor-pointer hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-400 ${vendedorEfectivo === r.id ? 'bg-blue-50' : ''}`
   }, React.createElement("td", {
     className: "p-3 font-bold text-slate-800"
   }, r.nombre), React.createElement("td", {
@@ -2482,10 +2570,23 @@ const MapaVisitasPantalla = ({
   currentUser
 }) => {
   const [vista, setVista] = useState('visitas');
-  const [periodo, setPeriodo] = useState(() => periodoVisitas('hoy', diaLocal()));
+  const hoy = useDiaActual();
+  const [seleccion, setSeleccion] = useState({
+    clave: 'hoy',
+    desde: '',
+    hasta: ''
+  });
+  const periodo = seleccion.clave ? periodoVisitas(seleccion.clave, hoy) : {
+    desde: seleccion.desde,
+    hasta: seleccion.hasta
+  };
   const [vendedorSel, setVendedorSel] = useState('ALL');
-  const cambiarPeriodo = p => {
-    setPeriodo(p);
+  const cambiarPeriodo = (p, clave) => {
+    setSeleccion({
+      clave: clave || '',
+      desde: p.desde,
+      hasta: p.hasta
+    });
     setVendedorSel('ALL');
   };
   useEffect(() => {
