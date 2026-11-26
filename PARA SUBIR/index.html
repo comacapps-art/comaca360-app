@@ -1740,6 +1740,31 @@ const leerVisitasDelPeriodo = async (desde, hasta) => {
   }, trabajador));
   return resultados.flat();
 };
+const lecturaDelPeriodo = ({
+  periodoEnSemana,
+  semana,
+  aparte,
+  clave,
+  desde,
+  hasta
+}) => {
+  if (periodoEnSemana) return {
+    cargando: semana.cargando,
+    error: semana.error,
+    visitas: visitasDelPeriodo(semana.visitas, desde, hasta)
+  };
+  const esDeEste = aparte.clave === clave;
+  return {
+    cargando: !esDeEste || aparte.cargando,
+    error: esDeEste && aparte.error,
+    visitas: esDeEste ? aparte.visitas : []
+  };
+};
+const ubicacionesEnBusqueda = ({
+  verificable,
+  candidatas,
+  procesadas
+}) => !!verificable && (candidatas || []).length > 0 && procesadas !== candidatas;
 const VisitasVendedorView = ({
   currentUser,
   cartera,
@@ -2112,6 +2137,7 @@ const VisitasMapaPanel = ({
     desde,
     hasta
   } = periodo;
+  const clavePeriodo = desde + '|' + hasta;
   const unDia = desde === hasta;
   const diasPeriodo = diasEntreVisita(desde, hasta) + 1;
   const periodoEnSemana = !!desde && !!hasta && desde >= desdeSemana && hasta <= hoy;
@@ -2150,7 +2176,8 @@ const VisitasMapaPanel = ({
     visitas: [],
     cargando: false,
     error: false,
-    hora: null
+    hora: null,
+    clave: ''
   });
   const [recarga, setRecarga] = useState(0);
   useEffect(() => {
@@ -2159,7 +2186,8 @@ const VisitasMapaPanel = ({
         visitas: [],
         cargando: false,
         error: false,
-        hora: null
+        hora: null,
+        clave: ''
       });
       return;
     }
@@ -2168,14 +2196,16 @@ const VisitasMapaPanel = ({
       visitas: [],
       cargando: true,
       error: false,
-      hora: null
+      hora: null,
+      clave: clavePeriodo
     });
     leerVisitasDelPeriodo(desde, hasta).then(visitas => {
       if (activo) setAparte({
         visitas,
         cargando: false,
         error: false,
-        hora: new Date().toISOString()
+        hora: new Date().toISOString(),
+        clave: clavePeriodo
       });
     }).catch(err => {
       console.warn('No se pudieron leer las visitas del período', err);
@@ -2183,19 +2213,30 @@ const VisitasMapaPanel = ({
         visitas: [],
         cargando: false,
         error: true,
-        hora: null
+        hora: null,
+        clave: clavePeriodo
       });
     });
     return () => {
       activo = false;
     };
   }, [desde, hasta, periodoEnSemana, recarga]);
-  const cargando = periodoEnSemana ? semana.cargando : aparte.cargando;
-  const errorLectura = periodoEnSemana ? semana.error : aparte.error;
-  const visitasPeriodo = useMemo(() => periodoEnSemana ? visitasDelPeriodo(semana.visitas, desde, hasta) : aparte.visitas, [periodoEnSemana, semana.visitas, aparte.visitas, desde, hasta]);
+  const lectura = useMemo(() => lecturaDelPeriodo({
+    periodoEnSemana,
+    semana,
+    aparte,
+    clave: clavePeriodo,
+    desde,
+    hasta
+  }), [periodoEnSemana, semana, aparte, clavePeriodo, desde, hasta]);
+  const {
+    cargando,
+    error: errorLectura,
+    visitas: visitasPeriodo
+  } = lectura;
   const esDeMiEquipo = React.useCallback(vendedorId => visitaEsDeMiEquipo(vendedorId, users, currentUser), [users, currentUser]);
   const visitasEquipo = useMemo(() => visitasPeriodo.filter(v => esDeMiEquipo(v.vendedorId)), [visitasPeriodo, esDeMiEquipo]);
-  const candidatasAlerta = useMemo(() => unirVisitasPorId(periodoEnSemana || !verificable ? [] : aparte.visitas, semana.visitas).filter(v => esDeMiEquipo(v.vendedorId)), [semana.visitas, aparte.visitas, periodoEnSemana, verificable, esDeMiEquipo]);
+  const candidatasAlerta = useMemo(() => unirVisitasPorId(periodoEnSemana || !verificable || aparte.clave !== clavePeriodo ? [] : aparte.visitas, semana.visitas).filter(v => esDeMiEquipo(v.vendedorId)), [semana.visitas, aparte.visitas, aparte.clave, clavePeriodo, periodoEnSemana, verificable, esDeMiEquipo]);
   const vendedores = useMemo(() => {
     const m = new Map();
     visitasEquipo.forEach(v => {
@@ -2208,10 +2249,14 @@ const VisitasMapaPanel = ({
   }, [visitasEquipo]);
   const vendedorEfectivo = vendedores.some(v => v.id === vendedorSel) ? vendedorSel : 'ALL';
   const [referencias, setReferencias] = useState({});
+  const [ubicProcesadas, setUbicProcesadas] = useState(null);
   useEffect(() => {
     const ahora = Date.now();
     const faltan = Array.from(new Set(candidatasAlerta.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)).filter(Boolean))).filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
-    if (faltan.length === 0) return;
+    if (faltan.length === 0) {
+      setUbicProcesadas(candidatasAlerta);
+      return;
+    }
     faltan.forEach(c => buscadasRef.current.set(c, ahora));
     leerUbicacionesDeClientes(faltan).then(({
       encontradas,
@@ -2222,8 +2267,14 @@ const VisitasMapaPanel = ({
         ...prev,
         ...encontradas
       }));
+      setUbicProcesadas(candidatasAlerta);
     });
   }, [candidatasAlerta]);
+  const buscandoUbicaciones = ubicacionesEnBusqueda({
+    verificable,
+    candidatas: candidatasAlerta,
+    procesadas: ubicProcesadas
+  });
   const evaluarReal = v => evaluarDistanciaVisita(v, referencias[claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)]);
   const evaluar = v => verificable ? evaluarReal(v) : {
     estado: 'no-verificada'
@@ -2437,7 +2488,9 @@ const VisitasMapaPanel = ({
     }
   }), r.label))), errorLectura && React.createElement("p", {
     className: "text-xs font-bold text-red-600"
-  }, "No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto."), visibles.length > 0 && verificable && React.createElement("p", {
+  }, "No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto."), visibles.length > 0 && verificable && buscandoUbicaciones && React.createElement("p", {
+    className: "text-xs text-slate-500 font-medium"
+  }, "Comparando con la ubicación de los clientes…"), visibles.length > 0 && verificable && !buscandoUbicaciones && React.createElement("p", {
     className: "text-xs text-slate-500 font-medium"
   }, "Verificación de las ", visibles.length, " visita(s) con la ubicación del cliente: ", verificacion.cerca, " cerca · ", verificacion.lejos, " lejos · ", verificacion.referencia, " primera visita (fija la ubicación del cliente) · ", verificacion.sinReferencia, " sin ubicación del cliente para comparar · ", verificacion.sinGps, " sin GPS."), visibles.length > 0 && !verificable && React.createElement("p", {
     className: "text-xs text-slate-500 font-medium"
@@ -2531,7 +2584,9 @@ const VisitasMapaPanel = ({
     className: "p-3 text-right"
   }, !verificable ? React.createElement("span", {
     className: "text-slate-400"
-  }, "-") : alertasPorVendedor[r.id] ? React.createElement("span", {
+  }, "-") : buscandoUbicaciones ? React.createElement("span", {
+    className: "text-slate-400"
+  }, "…") : alertasPorVendedor[r.id] ? React.createElement("span", {
     className: "font-black text-red-600"
   }, alertasPorVendedor[r.id]) : React.createElement("span", {
     className: "text-slate-600"
@@ -2556,7 +2611,7 @@ const VisitasMapaPanel = ({
     className: "p-3 text-right font-bold text-slate-700"
   }, totales.conPedido), React.createElement("td", {
     className: "p-3 text-right font-bold text-slate-700"
-  }, verificable ? totales.alertas : '-'), React.createElement("td", {
+  }, !verificable ? '-' : buscandoUbicaciones ? '…' : totales.alertas), React.createElement("td", {
     className: "p-3"
   }), React.createElement("td", {
     className: "p-3"

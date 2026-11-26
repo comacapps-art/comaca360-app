@@ -37,7 +37,7 @@ const FUNCIONES = ['diaLocal', 'horaCorta', 'escaparHtml', 'RESULTADOS_VISITA', 
   'reintentarTodasLasColasVisitas', 'visitaDePedido', 'safeGetTime', 'clienteCoincide', 'MAX_DIAS_PERIODO_VISITAS', 'MAX_DIAS_VERIFICAR_VISITAS',
   'MIN_LETRAS_BUSQUEDA_VISITA', 'diasEntreVisita', 'periodoVisitas', 'ajustarPeriodoVisitas', 'visitasDelPeriodo', 'unirVisitasPorId',
   'resumenVisitasPorVendedor', 'resumenVisitasDelDia', 'buscarClientesParaVisita', 'LOTE_UBICACIONES', 'LOTES_A_LA_VEZ', 'leerUbicacionesDeClientes',
-  'DIAS_POR_TRAMO_VISITAS', 'TRAMOS_A_LA_VEZ_VISITAS', 'trocearPeriodoVisitas', 'leerVisitasDelPeriodo'];
+  'DIAS_POR_TRAMO_VISITAS', 'TRAMOS_A_LA_VEZ_VISITAS', 'trocearPeriodoVisitas', 'leerVisitasDelPeriodo', 'lecturaDelPeriodo', 'ubicacionesEnBusqueda'];
 execFileSync(process.execPath, [path.join(__dirname, 'extraer.js'), '--extra', FUNCIONES.join(','), '--salida', SALIDA], { stdio: 'inherit' });
 const TEXTO = fs.readFileSync(SALIDA, 'utf8').replace(/\r\n/g, '\n');
 
@@ -736,6 +736,46 @@ const bateria = async (codigo, mostrar) => {
     assert.deepStrictEqual(await M.leerVisitasDelPeriodo('2025-01-01', '2025-01-05'), []);
   });
 
+  await prueba('período fuera de la semana: mientras no llegue SU lectura está cargando y no hay visitas (nunca un 0 falso ni datos de otro período)', async () => {
+    const { M } = nuevo();
+    const semana = { visitas: [{ id: 'a', dia: '2026-11-25' }, { id: 'b', dia: '2026-11-26' }], cargando: false, error: false };
+    const base = { semana, desde: '2026-11-01', hasta: '2026-11-26', clave: '2026-11-01|2026-11-26' };
+    // el primer cuadro tras cambiar de período: el estado de la lectura anterior (vacío, sin cargar, de OTRO período)
+    const vacioAnterior = { visitas: [], cargando: false, error: false, hora: null, clave: '' };
+    let r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: vacioAnterior });
+    assert.deepStrictEqual(r, { cargando: true, error: false, visitas: [] });
+    // lectura de otro período (con datos y con error): no se muestra ni su dato ni su error
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [{ id: 'z' }], cargando: false, error: true, clave: '2026-10-01|2026-10-31' } });
+    assert.deepStrictEqual(r, { cargando: true, error: false, visitas: [] });
+    // su lectura en curso
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [], cargando: true, error: false, clave: base.clave } });
+    assert.strictEqual(r.cargando, true);
+    // su lectura lista
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [{ id: 'x' }, { id: 'y' }], cargando: false, error: false, clave: base.clave } });
+    assert.deepStrictEqual(r, { cargando: false, error: false, visitas: [{ id: 'x' }, { id: 'y' }] });
+    // su lectura con error
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: false, aparte: { visitas: [], cargando: false, error: true, clave: base.clave } });
+    assert.deepStrictEqual(r, { cargando: false, error: true, visitas: [] });
+    // dentro de la semana: manda la escucha en vivo y se filtra por período
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: true, desde: '2026-11-26', hasta: '2026-11-26', aparte: vacioAnterior });
+    assert.deepStrictEqual(r.visitas.map(v => v.id), ['b']);
+    assert.strictEqual(r.cargando, false);
+    r = M.lecturaDelPeriodo({ ...base, periodoEnSemana: true, semana: { visitas: [], cargando: true, error: true }, aparte: vacioAnterior });
+    assert.strictEqual(r.cargando, true);
+    assert.strictEqual(r.error, true);
+  });
+
+  await prueba('ubicaciones de clientes: se está buscando hasta que termine la búsqueda de ESTA lista (y solo si se verifica)', async () => {
+    const { M } = nuevo();
+    const lista = [{ id: 'a' }];
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: null }), true);
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: [{ id: 'a' }] }), true, 'otra lista, aunque igual: aún no terminó');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: lista, procesadas: lista }), false);
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: false, candidatas: lista, procesadas: null }), false, 'sin verificar no hay nada que esperar');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: [], procesadas: null }), false, 'sin visitas no hay nada que buscar');
+    assert.strictEqual(M.ubicacionesEnBusqueda({ verificable: true, candidatas: undefined, procesadas: null }), false);
+  });
+
   await prueba('textos del mapa escapados y resultados conocidos', async () => {
     const { M } = nuevo();
     assert.strictEqual(M.escaparHtml(`<b onclick="x">'&`), '&lt;b onclick=&quot;x&quot;&gt;&#39;&amp;');
@@ -824,6 +864,18 @@ const estatico = () => {
     html.includes('onClick={() => setPeriodo(periodoVisitas(k, hoy), k)}') && html.includes("setSeleccion({ clave: clave || '', desde: p.desde, hasta: p.hasta })"));
   chequear('las filas de la tabla del monitoreo también se usan con el teclado',
     html.includes('role="button" tabIndex={0} aria-pressed={vendedorEfectivo === r.id}') && html.includes("if (e.key === 'Enter' || e.key === ' ')"));
+
+  chequear('el monitoreo sabe a qué período corresponde la lectura (clave) y no muestra un 0 falso al cambiar de período',
+    html.includes("const lectura = useMemo(() => lecturaDelPeriodo({ periodoEnSemana, semana, aparte, clave: clavePeriodo, desde, hasta }),") &&
+    html.includes("const { cargando, error: errorLectura, visitas: visitasPeriodo } = lectura;") &&
+    (html.match(/hora: null, clave: ''/g) || []).length === 2 && (html.match(/hora: null, clave: clavePeriodo/g) || []).length === 2 &&
+    html.includes("hora: new Date().toISOString(), clave: clavePeriodo") && html.includes('aparte.clave !== clavePeriodo) ? [] : aparte.visitas'));
+  chequear('mientras llegan las ubicaciones se dice "Comparando…" y la columna Alertas muestra "…" (no 0 cerca · 0 lejos)',
+    html.includes("const buscandoUbicaciones = ubicacionesEnBusqueda({ verificable, candidatas: candidatasAlerta, procesadas: ubicProcesadas });") &&
+    (html.match(/setUbicProcesadas\(candidatasAlerta\)/g) || []).length === 2 &&
+    html.includes('visibles.length > 0 && verificable && buscandoUbicaciones &&') && html.includes('Comparando con la ubicación de los clientes…') &&
+    html.includes('visibles.length > 0 && verificable && !buscandoUbicaciones &&') &&
+    html.includes('buscandoUbicaciones ? <span className="text-slate-400">…</span>') && html.includes("(buscandoUbicaciones ? '…' : totales.alertas)"));
   const crudas = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']');
   chequear('no quedan marcas de tilde "crudas" en el código (se escriben con String.fromCharCode)', !crudas.test(html));
   chequear('no quedan mapas de CARTO (ahora pide clave)', !html.includes('basemaps.cartocdn.com') && (html.match(/agregarFondoMapa\(mapRef\.current\)/g) || []).length === 2);
@@ -904,6 +956,11 @@ const estatico = () => {
     ['un tramo de visitas fallido se ignora', cambiar('} catch (e) { fallo = true; throw e; }', '} catch (e) { resultados[i] = []; }')],
     ['las visitas del período salen de la caché', cambiar('await getDocsFromServer(', 'await getDocs(')],
     ['el último tramo se pierde', cambiar('for (let i = 0; i <= total; i += dias) {', 'for (let i = 0; i < total; i += dias) {')],
+    ['el período muestra la lectura de otro período', cambiar('const esDeEste = aparte.clave === clave;', 'const esDeEste = true;')],
+    ['el error de otro período se muestra', cambiar('error: esDeEste && aparte.error', 'error: aparte.error')],
+    ['el período no figura como cargando hasta su lectura', cambiar('cargando: !esDeEste || aparte.cargando', 'cargando: aparte.cargando')],
+    ['nunca se espera a las ubicaciones', cambiar('!!verificable && (candidatas || []).length > 0 && procesadas !== candidatas', 'false')],
+    ['siempre se espera a las ubicaciones', cambiar('(candidatas || []).length > 0 && procesadas !== candidatas', '(candidatas || []).length > 0')],
     ['GPS sin código de error de permiso', cambiar('err => fin(reject, err),', 'err => fin(reject, new Error("x")),')]
   ];
   let detectados = 0;

@@ -1860,6 +1860,19 @@
             return resultados.flat();
         };
 
+        // Qué muestra el monitoreo del período elegido. Un período fuera de la semana se lee aparte y la lectura guarda a qué
+        // período corresponde (`clave`): mientras no llegue la de ESTE período, está cargando y no hay visitas; así nunca se
+        // ven datos de otro período ni un "0 visitas" falso en el primer cuadro tras cambiarlo (el efecto que lee aún no corrió).
+        const lecturaDelPeriodo = ({ periodoEnSemana, semana, aparte, clave, desde, hasta }) => {
+            if (periodoEnSemana) return { cargando: semana.cargando, error: semana.error, visitas: visitasDelPeriodo(semana.visitas, desde, hasta) };
+            const esDeEste = aparte.clave === clave;
+            return { cargando: !esDeEste || aparte.cargando, error: esDeEste && aparte.error, visitas: esDeEste ? aparte.visitas : [] };
+        };
+        // ¿Siguen llegando las ubicaciones de los clientes para esas visitas? Mientras sí, el "cerca / lejos / sin ubicación"
+        // no se muestra (diría "0 cerca · 0 lejos · todas sin ubicación" como si fuera el resultado). `procesadas` es la lista
+        // de visitas para la que ya terminó la búsqueda.
+        const ubicacionesEnBusqueda = ({ verificable, candidatas, procesadas }) => !!verificable && (candidatas || []).length > 0 && procesadas !== candidatas;
+
         const VisitasVendedorView = ({ currentUser, cartera, openModal }) => {
             const vendedorId = String(currentUser.id);
             const hoy = useDiaActual();
@@ -2157,6 +2170,7 @@
             const hoy = useDiaActual();
             const desdeSemana = restarDiasVisita(hoy, 6);
             const { desde, hasta } = periodo;
+            const clavePeriodo = desde + '|' + hasta;
             const unDia = desde === hasta;
             const diasPeriodo = diasEntreVisita(desde, hasta) + 1;
             const periodoEnSemana = !!desde && !!hasta && desde >= desdeSemana && hasta <= hoy;
@@ -2178,29 +2192,28 @@
             // SIEMPRE del servidor y en tramos de 7 días (leerVisitasDelPeriodo): si no hay conexión, o un tramo falla, sale el aviso
             // de error; con getDocs el SDK podía devolver solo lo que tenía guardado (las visitas de la semana) y mostrarlo como
             // si fuera todo el período.
-            const [aparte, setAparte] = useState({ visitas: [], cargando: false, error: false, hora: null });
+            const [aparte, setAparte] = useState({ visitas: [], cargando: false, error: false, hora: null, clave: '' });
             const [recarga, setRecarga] = useState(0);
             useEffect(() => {
-                if (!desde || !hasta || periodoEnSemana) { setAparte({ visitas: [], cargando: false, error: false, hora: null }); return; }
+                if (!desde || !hasta || periodoEnSemana) { setAparte({ visitas: [], cargando: false, error: false, hora: null, clave: '' }); return; }
                 let activo = true;
-                setAparte({ visitas: [], cargando: true, error: false, hora: null });
+                setAparte({ visitas: [], cargando: true, error: false, hora: null, clave: clavePeriodo });
                 leerVisitasDelPeriodo(desde, hasta)
-                    .then(visitas => { if (activo) setAparte({ visitas, cargando: false, error: false, hora: new Date().toISOString() }); })
-                    .catch(err => { console.warn('No se pudieron leer las visitas del período', err); if (activo) setAparte({ visitas: [], cargando: false, error: true, hora: null }); });
+                    .then(visitas => { if (activo) setAparte({ visitas, cargando: false, error: false, hora: new Date().toISOString(), clave: clavePeriodo }); })
+                    .catch(err => { console.warn('No se pudieron leer las visitas del período', err); if (activo) setAparte({ visitas: [], cargando: false, error: true, hora: null, clave: clavePeriodo }); });
                 return () => { activo = false; };
             }, [desde, hasta, periodoEnSemana, recarga]);
 
-            const cargando = periodoEnSemana ? semana.cargando : aparte.cargando;
-            const errorLectura = periodoEnSemana ? semana.error : aparte.error;
-            const visitasPeriodo = useMemo(() => (periodoEnSemana ? visitasDelPeriodo(semana.visitas, desde, hasta) : aparte.visitas),
-                [periodoEnSemana, semana.visitas, aparte.visitas, desde, hasta]);
+            const lectura = useMemo(() => lecturaDelPeriodo({ periodoEnSemana, semana, aparte, clave: clavePeriodo, desde, hasta }),
+                [periodoEnSemana, semana, aparte, clavePeriodo, desde, hasta]);
+            const { cargando, error: errorLectura, visitas: visitasPeriodo } = lectura;
 
             const esDeMiEquipo = React.useCallback((vendedorId) => visitaEsDeMiEquipo(vendedorId, users, currentUser), [users, currentUser]);
             const visitasEquipo = useMemo(() => visitasPeriodo.filter(v => esDeMiEquipo(v.vendedorId)), [visitasPeriodo, esDeMiEquipo]);
             // Para las alertas: la semana en vivo y, si el período (de hasta 7 días) se sale de ella, también ese período.
             const candidatasAlerta = useMemo(
-                () => unirVisitasPorId((periodoEnSemana || !verificable) ? [] : aparte.visitas, semana.visitas).filter(v => esDeMiEquipo(v.vendedorId)),
-                [semana.visitas, aparte.visitas, periodoEnSemana, verificable, esDeMiEquipo]);
+                () => unirVisitasPorId((periodoEnSemana || !verificable || aparte.clave !== clavePeriodo) ? [] : aparte.visitas, semana.visitas).filter(v => esDeMiEquipo(v.vendedorId)),
+                [semana.visitas, aparte.visitas, aparte.clave, clavePeriodo, periodoEnSemana, verificable, esDeMiEquipo]);
             const vendedores = useMemo(() => {
                 const m = new Map();
                 visitasEquipo.forEach(v => { if (!m.has(v.vendedorId)) m.set(v.vendedorId, v.vendedorNombre || v.vendedorId); });
@@ -2213,18 +2226,21 @@
             // eran más de mil lecturas a la vez y la pantalla se congelaba medio minuto). Solo se recuerdan las
             // encontradas; las que no existen (o cuyo lote falló) se vuelven a buscar como mucho cada 2 minutos.
             const [referencias, setReferencias] = useState({});
+            const [ubicProcesadas, setUbicProcesadas] = useState(null);
             useEffect(() => {
                 const ahora = Date.now();
                 const faltan = Array.from(new Set(candidatasAlerta.map(v => claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)).filter(Boolean)))
                     .filter(c => !referencias[c] && !(buscadasRef.current.has(c) && ahora - buscadasRef.current.get(c) < 120000));
-                if (faltan.length === 0) return;
+                if (faltan.length === 0) { setUbicProcesadas(candidatasAlerta); return; }
                 faltan.forEach(c => buscadasRef.current.set(c, ahora));
                 leerUbicacionesDeClientes(faltan).then(({ encontradas, fallidas }) => {
                     fallidas.forEach(c => buscadasRef.current.delete(c));
                     if (Object.keys(encontradas).length > 0) setReferencias(prev => ({ ...prev, ...encontradas }));
+                    setUbicProcesadas(candidatasAlerta);
                 });
             }, [candidatasAlerta]);
 
+            const buscandoUbicaciones = ubicacionesEnBusqueda({ verificable, candidatas: candidatasAlerta, procesadas: ubicProcesadas });
             const evaluarReal = (v) => evaluarDistanciaVisita(v, referencias[claveClienteVisita(v.clienteId, v.clienteNombre, v.vendedorId)]);
             const evaluar = (v) => (verificable ? evaluarReal(v) : { estado: 'no-verificada' });
             const evaluadasEquipo = useMemo(() => visitasEquipo.map(v => ({ v, ev: evaluar(v) })), [visitasEquipo, referencias, verificable]);
@@ -2378,7 +2394,10 @@
                         {errorLectura && (
                             <p className="text-xs font-bold text-red-600">No se pudieron leer las visitas (revisa la señal). Lo que ves puede estar incompleto.</p>
                         )}
-                        {visibles.length > 0 && verificable && (
+                        {visibles.length > 0 && verificable && buscandoUbicaciones && (
+                            <p className="text-xs text-slate-500 font-medium">Comparando con la ubicación de los clientes…</p>
+                        )}
+                        {visibles.length > 0 && verificable && !buscandoUbicaciones && (
                             <p className="text-xs text-slate-500 font-medium">
                                 Verificación de las {visibles.length} visita(s) con la ubicación del cliente: {verificacion.cerca} cerca · {verificacion.lejos} lejos · {verificacion.referencia} primera visita (fija la ubicación del cliente) · {verificacion.sinReferencia} sin ubicación del cliente para comparar · {verificacion.sinGps} sin GPS.
                             </p>
@@ -2442,7 +2461,7 @@
                                         <td className="p-3 text-right font-black text-blue-900">{r.total}</td>
                                         {RESULTADOS_VISITA.map(x => <td key={x.id} className="p-3 text-right text-slate-600">{r.porResultado[x.id] || 0}</td>)}
                                         <td className="p-3 text-right text-slate-600">{r.conPedido}</td>
-                                        <td className="p-3 text-right">{!verificable ? <span className="text-slate-400">-</span> : (alertasPorVendedor[r.id] ? <span className="font-black text-red-600">{alertasPorVendedor[r.id]}</span> : <span className="text-slate-600">0</span>)}</td>
+                                        <td className="p-3 text-right">{!verificable ? <span className="text-slate-400">-</span> : buscandoUbicaciones ? <span className="text-slate-400">…</span> : (alertasPorVendedor[r.id] ? <span className="font-black text-red-600">{alertasPorVendedor[r.id]}</span> : <span className="text-slate-600">0</span>)}</td>
                                         {unDia ? (
                                             <>
                                                 <td className="p-3 text-right text-slate-600">{horaCorta(r.primera)}</td>
@@ -2464,7 +2483,7 @@
                                         <td className="p-3 text-right font-black text-blue-900">{totales.total}</td>
                                         {RESULTADOS_VISITA.map(x => <td key={x.id} className="p-3 text-right font-bold text-slate-700">{totales.porResultado[x.id] || 0}</td>)}
                                         <td className="p-3 text-right font-bold text-slate-700">{totales.conPedido}</td>
-                                        <td className="p-3 text-right font-bold text-slate-700">{verificable ? totales.alertas : '-'}</td>
+                                        <td className="p-3 text-right font-bold text-slate-700">{!verificable ? '-' : (buscandoUbicaciones ? '…' : totales.alertas)}</td>
                                         <td className="p-3"></td>
                                         <td className="p-3"></td>
                                     </tr>
